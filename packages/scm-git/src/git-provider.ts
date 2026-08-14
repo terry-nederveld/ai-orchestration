@@ -133,6 +133,22 @@ export class GitSourceControlProvider implements SourceControlProvider {
       commitEnv.GIT_COMMITTER_EMAIL = options.authorEmail
     }
 
+    // Fresh clones and worktrees on machines without a global git identity
+    // (CI runners, daemon hosts) would otherwise fail with "empty ident";
+    // fall back to a neutral identity when none is configured or supplied.
+    if (options.authorName === undefined || options.authorEmail === undefined) {
+      const configured = await this.git(['config', 'user.email'], workdir, commitEnv).catch(() => ({
+        stdout: '',
+        stderr: '',
+      }))
+      if (configured.stdout.trim().length === 0) {
+        commitEnv.GIT_AUTHOR_NAME ??= 'Overture'
+        commitEnv.GIT_COMMITTER_NAME ??= 'Overture'
+        commitEnv.GIT_AUTHOR_EMAIL ??= 'overture@localhost'
+        commitEnv.GIT_COMMITTER_EMAIL ??= 'overture@localhost'
+      }
+    }
+
     await this.git(['commit', '-m', options.message], workdir, commitEnv)
     const { stdout } = await this.git(['rev-parse', 'HEAD'], workdir, commitEnv)
     return { sha: stdout.trim(), message: options.message }

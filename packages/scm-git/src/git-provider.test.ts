@@ -163,4 +163,46 @@ describe('GitSourceControlProvider', () => {
     expect(status.ahead).toBe(1)
     expect(status.behind).toBe(0)
   })
+
+  it('commits with a fallback identity when none is configured (CI runners)', async () => {
+    // Isolate from any global/system git config so the machine's own
+    // identity cannot mask the missing-ident case CI runners hit.
+    const isolated = new GitSourceControlProvider({
+      env: { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+    })
+    const origin = await tempDir('origin')
+    await initRepo(origin)
+    const clonePath = join(await tempDir('clone'), 'repo')
+    await isolated.clone({ locator: origin }, clonePath)
+
+    await writeFile(join(clonePath, 'new.txt'), 'content\n')
+    const info = await isolated.commit(clonePath, { message: 'feat: add file without identity' })
+    expect(info.sha).toMatch(/^[0-9a-f]{40}$/)
+
+    const { stdout } = await execFileSafe('git', ['log', '-1', '--format=%an <%ae>'], {
+      cwd: clonePath,
+    })
+    expect(stdout.trim()).toBe('Overture <overture@localhost>')
+  })
+
+  it('explicit author options override the fallback identity', async () => {
+    const isolated = new GitSourceControlProvider({
+      env: { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+    })
+    const origin = await tempDir('origin')
+    await initRepo(origin)
+    const clonePath = join(await tempDir('clone'), 'repo')
+    await isolated.clone({ locator: origin }, clonePath)
+
+    await writeFile(join(clonePath, 'new.txt'), 'content\n')
+    await isolated.commit(clonePath, {
+      message: 'feat: add file with explicit author',
+      authorName: 'Custom Author',
+      authorEmail: 'custom@example.com',
+    })
+    const { stdout } = await execFileSafe('git', ['log', '-1', '--format=%an <%ae>'], {
+      cwd: clonePath,
+    })
+    expect(stdout.trim()).toBe('Custom Author <custom@example.com>')
+  })
 })
