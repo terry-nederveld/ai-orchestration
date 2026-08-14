@@ -19,7 +19,6 @@ import type {
 } from '@overture/core'
 import { asId } from '@overture/core'
 import type { StepExecutionState, StepExecutorFn } from '@overture/workflow'
-import { interpolate } from '@overture/workflow'
 import type { AgentRouter, CommandRunner } from './ports.js'
 
 export interface ExecutorDependencies {
@@ -45,11 +44,6 @@ export interface ExecutorDependencies {
   readonly onSessionStarted?: (sessionId: string) => void
 }
 
-const expressionContext = (state: StepExecutionState) => ({
-  steps: state.stepResults,
-  vars: state.variables,
-})
-
 export function createStepExecutors(deps: ExecutorDependencies): {
   agent: StepExecutorFn
   command: StepExecutorFn
@@ -62,7 +56,8 @@ export function createStepExecutors(deps: ExecutorDependencies): {
     const sessionId = asId<'session'>(deps.ids.next('session'))
     deps.onSessionStarted?.(String(sessionId))
 
-    const goal = interpolate(step.goal, expressionContext(state))
+    // The engine interpolates step fields before invoking executors.
+    const goal = step.goal
     const timeoutMs = step.timeoutMs ?? deps.agentDefaults?.timeoutMs
     const handle = await executor.start({
       runId: deps.run.id,
@@ -126,7 +121,7 @@ export function createStepExecutors(deps: ExecutorDependencies): {
 
   const command: StepExecutorFn = async (step, state) => {
     if (step.kind !== 'command') throw new Error(`expected command step, got ${step.kind}`)
-    const rendered = interpolate(step.command, expressionContext(state))
+    const rendered = step.command
     const cwd = deps.workspace?.path
     if (!cwd) return { status: 'failed', error: 'command step requires a workspace' }
     const result = await deps.commands.run(rendered, {
@@ -147,8 +142,7 @@ export function createStepExecutors(deps: ExecutorDependencies): {
     if (!implementation) {
       return { status: 'failed', error: `unknown workflow action: ${step.action}` }
     }
-    const args = interpolateArgs(step.with ?? {}, state)
-    const outputs = await implementation.execute(args, {
+    const outputs = await implementation.execute(step.with ?? {}, {
       runId: String(deps.run.id),
       variables: state.variables,
       stepResults: state.stepResults,
@@ -205,16 +199,4 @@ function buildAgentContext(item: WorkItem, state: StepExecutionState): string {
     }
   }
   return [...parts, ...priorSummaries].join('\n\n')
-}
-
-function interpolateArgs(
-  args: Readonly<Record<string, unknown>>,
-  state: StepExecutionState,
-): Readonly<Record<string, unknown>> {
-  const context = expressionContext(state)
-  const rendered: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(args)) {
-    rendered[key] = typeof value === 'string' ? interpolate(value, context) : value
-  }
-  return rendered
 }
