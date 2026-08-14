@@ -45,20 +45,29 @@ providers → control plane/CLI → desktop UI → packaging → hardening → d
 
 ## Active Work
 
-- Sub-agents in flight: persistence (done, 63 tests, pending report/commit),
-  testkit (done-ish, contract suites in place), workflow engine (fixing
-  tainted-skip status rule per lead review), scm-git + workspaces, model
-  providers (anthropic/openai), extensions/hooks/skills.
-- Lead: orchestrator kernel written (`@overture/orchestrator` — coordinator,
-  scheduler, eligibility, routing, actions, executors); 6/7 tests pass; the
-  7th awaits the workflow-engine taint fix.
-- Research agents (Symphony/Pi, SDKs/auth, work APIs, desktop) still out.
+- In flight: agent providers (claude-code/codex/copilot + discovery),
+  desktop web UI, built-in workflow rework to assert-gate pattern, MCP
+  client integration in extensions.
+- Committed since last update: workflow engine (tainted-skip rule, 93
+  tests), orchestrator kernel (multi-source work resolution,
+  workflow.assert action), extensions (36 tests), all four work providers
+  (GitHub 44, Jira Cloud+DC 91, Linear 75 tests), server control plane
+  (10 tests), secrets (11 tests), config (8 tests), e2e vertical slice
+  (real git origin → worktree → scripted-model native runtime → real
+  tools → conventional commit → push → gh PR → transition; passing).
+- CLI + daemon assembly written; compiles once agent-* packages land.
 
 ## Integration decisions made while wiring
 
-- Workflow engine success rule must distinguish benign `when`-skips from
-  failure-caused (tainted) skips; remediation forgiveness is explicit via
-  `when: steps.review.succeeded || steps.remediate.succeeded` on delivery.
+- when-gates choose whether a step runs; assert-gates decide success.
+  Delivery is gated on `workflow.assert` (`when: 'true'`, condition over
+  step results) because when-false skips are benign by design and could
+  otherwise mask failures. Built-in workflow uses this pattern.
+- Orchestrator resolves work providers per item (multi-source);
+  multiple instances of the same adapter type deferred post-v1.
+- Jira claim marker is label-presence (not per-claimant idempotent);
+  authoritative claiming is the kernel ClaimStore. GitHub/Linear use
+  claimant comment markers and pass the shared contract suite.
 - Per-package tests run as `vitest run --root ../.. --project <name>`.
 - ScriptedModelProvider snapshots request messages (runtime mutates arrays).
 
