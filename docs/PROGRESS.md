@@ -12,9 +12,9 @@ commits/PRs. CLI binary: `overture`. Repo-level workflow file:
 
 ## Current Objective
 
-Research complete → write initial ADRs → implement core (domain, events,
-persistence, fakes, runtime, workflow engine, orchestrator) → vertical slice →
-providers → control plane/CLI → desktop UI → packaging → hardening → docs.
+v1 delivery complete pending the final independent review verdict. All
+functional workstreams, security remediation, packaging, and docs are
+committed.
 
 ## Completed Milestones
 
@@ -101,16 +101,26 @@ apps/
   desktop/           desktop shell + UI
 ```
 
-## Known Failures / Risks
+## Known Limitations / Risks
 
-- Copilot CLI not installed locally; subscription-agent target will lead with
-  Claude Code (installed + authenticated locally) — verify during provider work.
-- Jira Cloud / Data Center / Linear live validation depends on credential
-  availability; contract tests + documented limitation as fallback.
+- Copilot CLI not installed on the build machine: adapter is implemented
+  and unit-tested with clean not-installed detection; live verification
+  pending a machine with the CLI (subscription paths live-verified with
+  Codex; Claude Code detection verified live).
+- Jira Cloud / Data Center / Linear adapters are contract- and
+  fake-backend-tested; live validation requires tenant credentials not
+  available in this environment (documented external limitation).
+- Distribution packaging gaps documented in apps/desktop/README.md:
+  daemon resource staging for installed apps, code signing/notarization,
+  Windows/Linux bundles buildable only on their own platforms.
 
 ## Test Status
 
-- No code yet.
+- Full workspace suite green: ~1,300 tests across 100+ files (unit,
+  contract, integration, e2e vertical slice over real git). UI: 59
+  component tests. Desktop shell: cargo check/clippy clean; debug .app
+  built and supervision-verified on macOS arm64. Live verification:
+  daemon boot + CLI smoke, one real Codex subscription agent run.
 
 ## Deferred / Post-v1
 
