@@ -5,27 +5,72 @@
     "outDir": "dist"
   },
   "references": [
-    { "path": "../core" },
-    { "path": "../config" },
-    { "path": "../secrets" },
-    { "path": "../server" },
-    { "path": "../orchestrator" },
-    { "path": "../persistence" },
-    { "path": "../policy" },
-    { "path": "../runtime" },
-    { "path": "../tools" },
-    { "path": "../workflow" },
-    { "path": "../scm-git" },
-    { "path": "../workspaces" },
-    { "path": "../providers/model-anthropic" },
-    { "path": "../providers/model-openai" },
-    { "path": "../providers/work-github" },
-    { "path": "../providers/work-jira-cloud" },
-    { "path": "../providers/work-jira-datacenter" },
-    { "path": "../providers/work-linear" },
-    { "path": "../providers/agent-claude-code" },
-    { "path": "../providers/agent-codex" },
-    { "path": "../providers/agent-copilot" }
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../config"
+    },
+    {
+      "path": "../secrets"
+    },
+    {
+      "path": "../server"
+    },
+    {
+      "path": "../orchestrator"
+    },
+    {
+      "path": "../persistence"
+    },
+    {
+      "path": "../policy"
+    },
+    {
+      "path": "../runtime"
+    },
+    {
+      "path": "../tools"
+    },
+    {
+      "path": "../workflow"
+    },
+    {
+      "path": "../scm-git"
+    },
+    {
+      "path": "../workspaces"
+    },
+    {
+      "path": "../providers/model-anthropic"
+    },
+    {
+      "path": "../providers/model-openai"
+    },
+    {
+      "path": "../providers/work-github"
+    },
+    {
+      "path": "../providers/work-jira-cloud"
+    },
+    {
+      "path": "../providers/work-jira-datacenter"
+    },
+    {
+      "path": "../providers/work-linear"
+    },
+    {
+      "path": "../providers/agent-claude-code"
+    },
+    {
+      "path": "../providers/agent-codex"
+    },
+    {
+      "path": "../providers/agent-copilot"
+    },
+    {
+      "path": "../extensions"
+    }
   ],
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"]

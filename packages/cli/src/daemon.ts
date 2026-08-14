@@ -225,6 +225,54 @@ export async function assembleDaemon(options: {
   const toolRegistry = new DefaultToolRegistry()
   toolRegistry.register(createCodingToolProvider())
 
+  // ----- extensions, MCP, hooks, skills ----------------------------------
+  const {
+    DefaultHookRegistry,
+    DirectoryExtensionProvider,
+    ExtensionHost,
+    createMcpToolProviders,
+    loadSkillsFromDirectories,
+    renderSkillsPrompt,
+  } = await import('@overture/extensions')
+
+  const hooks = new DefaultHookRegistry({ logger: logger.child({ component: 'hooks' }) })
+  const extensionActions: import('@overture/core').WorkflowAction[] = []
+  for (const path of config.extensions.paths) {
+    const host = new ExtensionHost({
+      provider: new DirectoryExtensionProvider({ id: `dir:${path}`, rootDir: path, logger }),
+      hookRegistry: hooks,
+      toolRegistry,
+      actionSink: (contributed) => extensionActions.push(...contributed),
+      logger,
+    })
+    const summary = await host.loadAll()
+    if (summary.loaded.length > 0) {
+      logger.info('extensions loaded', { path, loaded: summary.loaded })
+    }
+    for (const failure of summary.failed) {
+      logger.warn('extension failed to load', { id: failure.id, error: failure.error })
+    }
+  }
+
+  const mcpConfigs = config.mcp.servers.map((server) => ({
+    name: server.name,
+    transport: server.transport,
+    args: server.args,
+    env: server.env,
+    headers: server.headers,
+    ...(server.command !== undefined ? { command: server.command } : {}),
+    ...(server.url !== undefined ? { url: server.url } : {}),
+  }))
+  for (const mcpProvider of createMcpToolProviders(mcpConfigs, { logger })) {
+    toolRegistry.register(mcpProvider)
+  }
+
+  const skills = await loadSkillsFromDirectories(config.skills.paths)
+  const skillsPrompt = skills.length > 0 ? renderSkillsPrompt(skills) : undefined
+  if (skills.length > 0) {
+    logger.info('skills loaded', { count: skills.length })
+  }
+
   for (const modelProvider of modelProviders) {
     const runtime = new NativeAgentRuntime({
       model: modelProvider,
@@ -232,6 +280,7 @@ export async function assembleDaemon(options: {
       tools: toolRegistry,
       policy,
       approvals,
+      hooks,
       sessions: persistence.sessions,
       clock,
       logger: logger.child({ runtime: `native-${modelProvider.info.id}` }),
@@ -275,6 +324,18 @@ export async function assembleDaemon(options: {
       logger.warn(
         'no default routing profile and no usable executors; agent steps will fail until configured',
       )
+    }
+  }
+
+  // Configured skills are appended to every routing profile's system prompt.
+  if (skillsPrompt) {
+    for (const [name, profile] of Object.entries(routingProfiles)) {
+      routingProfiles[name] = {
+        ...profile,
+        systemPrompt: profile.systemPrompt
+          ? `${profile.systemPrompt}\n\n${skillsPrompt}`
+          : skillsPrompt,
+      }
     }
   }
 
@@ -375,6 +436,9 @@ export async function assembleDaemon(options: {
   // ----- kernel -----------------------------------------------------------
   const actions = new WorkflowActionRegistry()
   actions.register(builtinActionFactory)
+  if (extensionActions.length > 0) {
+    actions.register(() => extensionActions)
+  }
 
   // Items carry their adapter's provider id; resolve claims/transitions by it.
   const byAdapterId = new Map<string, WorkProvider>()

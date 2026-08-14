@@ -26,6 +26,7 @@
     "@overture/agent-copilot": "workspace:*",
     "@overture/config": "workspace:*",
     "@overture/core": "workspace:*",
+    "@overture/extensions": "workspace:*",
     "@overture/model-anthropic": "workspace:*",
     "@overture/model-openai": "workspace:*",
     "@overture/orchestrator": "workspace:*",

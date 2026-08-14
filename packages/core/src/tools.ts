@@ -32,6 +32,11 @@ export interface Tool {
   readonly descriptor: ToolDescriptor
   /** Permissions this tool needs; checked before every execution. */
   readonly requiredPermissions: readonly PermissionCapability[]
+  /**
+   * Policy target for a given input (e.g. `mcp:<server>:<tool>`); when
+   * absent, the runtime derives a target from well-known input keys.
+   */
+  policyTarget?(input: unknown): string | undefined
   execute(input: unknown, context: ToolExecutionContext): Promise<ToolResult>
 }
 

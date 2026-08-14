@@ -18,6 +18,7 @@
     "test": "vitest run --root ../.. --project @overture/extensions"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@overture/core": "workspace:*",
     "yaml": "^2.8.0",
     "zod": "^4.0.0"

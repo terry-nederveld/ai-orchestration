@@ -16,7 +16,15 @@ export class DefaultToolRegistry implements ToolRegistry {
     const tools: Tool[] = []
     const seen = new Set<string>()
     for (const provider of this.providers) {
-      for (const tool of await provider.listTools()) {
+      // One unreachable provider (e.g. a down MCP server) must not take out
+      // tool resolution for everything else.
+      let provided: readonly Tool[]
+      try {
+        provided = await provider.listTools()
+      } catch {
+        continue
+      }
+      for (const tool of provided) {
         const name = tool.descriptor.name
         if (seen.has(name)) continue
         if (names && !names.includes(name)) continue

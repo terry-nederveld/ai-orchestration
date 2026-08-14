@@ -541,7 +541,7 @@ export class NativeAgentRuntime implements AgentRuntime {
     input: unknown,
     request: AgentRunRequest,
   ): Promise<{ allowed: true } | { allowed: false; message: string }> {
-    const target = targetOf(input)
+    const target = tool.policyTarget?.(input) ?? targetOf(input)
     for (const capability of tool.requiredPermissions) {
       const permissionRequest = {
         capability,
