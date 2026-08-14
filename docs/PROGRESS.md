@@ -12,9 +12,9 @@ commits/PRs. CLI binary: `overture`. Repo-level workflow file:
 
 ## Current Objective
 
-v1 delivery complete pending the final independent review verdict. All
-functional workstreams, security remediation, packaging, and docs are
-committed.
+v1 DELIVERED. Final independent review's blocking finding remediated,
+AgentProvider contract suite added, clean-checkout validation green
+(1,311 tests). See docs/DELIVERY.md for the delivery report.
 
 ## Completed Milestones
 
