@@ -45,9 +45,16 @@ providers → control plane/CLI → desktop UI → packaging → hardening → d
 
 ## Active Work
 
-- In flight: agent providers (claude-code/codex/copilot + discovery),
-  desktop web UI, built-in workflow rework to assert-gate pattern, MCP
-  client integration in extensions.
+- In flight: Tauri shell + packaging (apps/desktop/shell), final
+  independent architecture review.
+- Completed since: agent providers (live-verified Codex subscription run),
+  CLI + daemon (composition root, live smoke test), desktop web UI, MCP
+  integration, docs (user+developer+security), independent security
+  review with all five must-fix findings remediated (ADR-0016):
+  command interpolation via env indirection, redaction across event
+  log/SSE/sessions, push-time attribution validation, workspace env
+  allowlist, explicit permission presets. Plus symlink containment,
+  timing-safe auth, untrusted-content framing, full-UUID ids.
 - Committed since last update: workflow engine (tainted-skip rule, 93
   tests), orchestrator kernel (multi-source work resolution,
   workflow.assert action), extensions (36 tests), all four work providers
@@ -107,7 +114,19 @@ apps/
 
 ## Deferred / Post-v1
 
-- (none yet)
+- Windows native Credential Manager adapter (encrypted-file fallback in
+  v1; @napi-rs/keyring is the designated upgrade path, ADR-0015).
+- Container/remote workspace strategies behind the WorkspaceProvider port.
+- Multiple instances of one work-provider type (config supports it;
+  per-instance claim resolution needs instance ids).
+- Control-plane API: single-item GET endpoints, structured error
+  payloads, state/label enumeration, per-run usage attribution (UI
+  works around all four client-side).
+- Tool-name collision warnings in the registry; extension tool
+  namespacing.
+- macOS keychain argv exposure (ps-visible transiently on write) —
+  documented in docs/security.md.
+- Cheapest-suitable-model automatic routing (capability data exists).
 
 ## Important Constraints
 
