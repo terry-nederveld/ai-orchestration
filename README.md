@@ -89,4 +89,6 @@ pnpm typecheck
 - [Extending Overture](docs/extending.md) — adding a provider, tool,
   workflow action, or extension.
 - [Architecture Overview](docs/architecture.md) — the one-page system map.
+- [Security Model](docs/security.md) — what is enforced, what is trusted,
+  and what you accept when enabling each feature.
 - [Architecture Decision Records](docs/adrs/) — the full design record.
