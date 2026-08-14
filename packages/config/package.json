@@ -1,0 +1,29 @@
+{
+  "name": "@overture/config",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Overture layered configuration: defaults, user, project, and run overrides",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run --root ../.. --project @overture/config"
+  },
+  "dependencies": {
+    "@overture/core": "workspace:*",
+    "yaml": "^2.8.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
