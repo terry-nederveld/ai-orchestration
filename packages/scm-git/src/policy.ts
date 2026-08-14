@@ -21,6 +21,17 @@ export function assertNoAttributionTrailers(message: string): void {
   }
 }
 
+/** Same check as assertNoAttributionTrailers, but reports the offending subject line. */
+export function assertNoAttributionTrailersInPushedCommit(message: string): void {
+  if (ATTRIBUTION_TRAILER_PATTERN.test(message)) {
+    const subject = message.split('\n')[0]?.trim() || '(empty subject)'
+    throw new OrchestratorError(
+      `Refusing to push: commit "${subject}" contains a disallowed attribution trailer`,
+      'policy',
+    )
+  }
+}
+
 export function assertNoAttributionContent(text: string, context: string): void {
   if (ATTRIBUTION_TRAILER_PATTERN.test(text) || WATERMARK_PATTERN.test(text)) {
     throw new OrchestratorError(

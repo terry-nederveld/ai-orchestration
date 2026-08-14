@@ -16,12 +16,23 @@ import type {
 } from '@overture/core'
 import { type ExecResult, execFileSafe } from './exec.js'
 import { capPatch, parseNumstat, parsePorcelainV2Status } from './parse.js'
-import { assertNoAttributionTrailers } from './policy.js'
+import { assertNoAttributionTrailers, assertNoAttributionTrailersInPushedCommit } from './policy.js'
 
 export interface GitSourceControlProviderOptions {
   readonly gitBinary?: string
   readonly env?: Record<string, string>
+  /**
+   * Skips the pre-push attribution scan (see push()). Defaults to false —
+   * every push is checked unless a caller explicitly opts out. This exists
+   * for tests and exotic setups, not for routine use.
+   */
+  readonly skipAttributionCheckOnPush?: true
 }
+
+/** Record separator: safe to split on since it cannot appear in commit text. */
+const RECORD_SEPARATOR = '\x1e'
+/** Cap for the fallback full-branch-log scan (no remotes configured yet). */
+const FALLBACK_LOG_LIMIT = 200
 
 export class GitSourceControlProvider implements SourceControlProvider {
   readonly info: ProviderInfo = {
@@ -34,10 +45,12 @@ export class GitSourceControlProvider implements SourceControlProvider {
 
   protected readonly gitBinary: string
   protected readonly baseEnv: Record<string, string> | undefined
+  private readonly skipAttributionCheckOnPush: boolean
 
   constructor(options: GitSourceControlProviderOptions = {}) {
     this.gitBinary = options.gitBinary ?? 'git'
     this.baseEnv = options.env
+    this.skipAttributionCheckOnPush = options.skipAttributionCheckOnPush ?? false
   }
 
   protected git(
@@ -126,6 +139,49 @@ export class GitSourceControlProvider implements SourceControlProvider {
   }
 
   async push(workdir: string, branch: string): Promise<void> {
+    if (!this.skipAttributionCheckOnPush) {
+      await this.assertNoAttributionInCommitsToPush(workdir, branch)
+    }
     await this.git(['push', '--set-upstream', 'origin', branch], workdir)
   }
+
+  /**
+   * Validates every commit that would be pushed, not just commits made
+   * through commit() — the delivery choke point is push(), since an agent
+   * can also commit directly via a shell tool, bypassing commit()'s check
+   * entirely (ATTRIB-BYPASS). Commits already on a remote-tracking ref are
+   * excluded (they were already validated or already public); everything
+   * else reachable from `branch` is scanned.
+   */
+  private async assertNoAttributionInCommitsToPush(workdir: string, branch: string): Promise<void> {
+    for (const message of await this.commitsToPush(workdir, branch)) {
+      assertNoAttributionTrailersInPushedCommit(message)
+    }
+  }
+
+  private async commitsToPush(workdir: string, branch: string): Promise<string[]> {
+    const format = `--format=%B${RECORD_SEPARATOR}`
+    const primary = await this.git(['log', format, branch, '--not', '--remotes'], workdir)
+
+    if (primary.stdout.trim().length === 0) {
+      const { stdout: remotes } = await this.git(['remote'], workdir)
+      const noRemotesConfigured = remotes.trim().length === 0
+      if (noRemotesConfigured) {
+        const fallback = await this.git(
+          ['log', format, branch, '-n', String(FALLBACK_LOG_LIMIT)],
+          workdir,
+        )
+        return splitCommitMessages(fallback.stdout)
+      }
+    }
+
+    return splitCommitMessages(primary.stdout)
+  }
+}
+
+function splitCommitMessages(output: string): string[] {
+  return output
+    .split(RECORD_SEPARATOR)
+    .map((message) => message.replace(/^\n+/, '').replace(/\n+$/, ''))
+    .filter((message) => message.length > 0)
 }
