@@ -1,0 +1,28 @@
+{
+  "name": "@overture/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Overture end-to-end orchestration tests over real git, tools, and runtime",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run --root ../.. --project @overture/e2e"
+  },
+  "dependencies": {
+    "@overture/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@overture/orchestrator": "workspace:*",
+    "@overture/persistence": "workspace:*",
+    "@overture/policy": "workspace:*",
+    "@overture/runtime": "workspace:*",
+    "@overture/scm-git": "workspace:*",
+    "@overture/testkit": "workspace:*",
+    "@overture/tools": "workspace:*",
+    "@overture/workflow": "workspace:*",
+    "@overture/workspaces": "workspace:*",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
