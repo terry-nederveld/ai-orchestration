@@ -1,0 +1,28 @@
+{
+  "name": "@overture/work-jira-cloud",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Jira Cloud (REST API v3) WorkProvider implementation",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run --root ../../.. --project @overture/work-jira-cloud"
+  },
+  "dependencies": {
+    "@overture/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@overture/testkit": "workspace:*",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
