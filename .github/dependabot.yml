@@ -1,0 +1,51 @@
+version: 2
+updates:
+  # npm/pnpm workspace packages
+  - package-ecosystem: npm
+    directories:
+      - "/"
+      - "/packages/*"
+      - "/packages/providers/*"
+      - "/apps/desktop/ui"
+      - "/apps/desktop/shell"
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    open-pull-requests-limit: 10
+
+  # Rust crates for the Tauri desktop shell
+  - package-ecosystem: cargo
+    directory: "/apps/desktop/shell/src-tauri"
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      cargo-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    open-pull-requests-limit: 5
+
+  # GitHub Actions used by CI
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      actions:
+        update-types:
+          - minor
+          - patch
+    open-pull-requests-limit: 5
