@@ -1,0 +1,29 @@
+{
+  "name": "@overture/workflow",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Declarative YAML workflow schema, expression evaluator, and execution engine",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run --root ../.. --project @overture/workflow"
+  },
+  "dependencies": {
+    "@overture/core": "workspace:*",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

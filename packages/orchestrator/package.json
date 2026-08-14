@@ -1,0 +1,30 @@
+{
+  "name": "@overture/orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Overture orchestration kernel: discovery, claiming, run coordination, delivery",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run --root ../.. --project @overture/orchestrator"
+  },
+  "dependencies": {
+    "@overture/core": "workspace:*",
+    "@overture/workflow": "workspace:*"
+  },
+  "devDependencies": {
+    "@overture/persistence": "workspace:*",
+    "@overture/testkit": "workspace:*",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
