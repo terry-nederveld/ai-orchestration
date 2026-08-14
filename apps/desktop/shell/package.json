@@ -1,0 +1,17 @@
+{
+  "name": "@overture/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Overture desktop shell: Tauri v2 window + sidecar supervisor around the Node daemon",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:debug": "tauri build --debug",
+    "icon": "tauri icon icons/source.svg -o src-tauri/icons"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.1"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capabilities for the main Overture window. Sidecar spawning, health checks, and daemon-connection injection are all handled on the Rust side and never exposed to the webview: the frontend gets no shell-execute, fs, or process permissions.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-title",
+    "core:event:allow-listen"
+  ]
+}

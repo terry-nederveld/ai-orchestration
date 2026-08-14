@@ -1,0 +1,27 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1b1530"/>
+      <stop offset="100%" stop-color="#0c0a18"/>
+    </linearGradient>
+    <linearGradient id="glyph" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8f7bff"/>
+      <stop offset="100%" stop-color="#3ddad0"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1024" height="1024" rx="224" fill="url(#bg)"/>
+
+  <!-- abstract waveform / tuning-fork glyph: three converging bars meeting a
+       common stem, suggesting orchestration of independent signals -->
+  <g stroke="url(#glyph)" stroke-linecap="round" fill="none">
+    <path d="M 340 300 L 340 470" stroke-width="46"/>
+    <path d="M 512 220 L 512 560" stroke-width="46"/>
+    <path d="M 684 300 L 684 470" stroke-width="46"/>
+    <path d="M 340 470 C 340 610, 420 660, 512 660 C 604 660, 684 610, 684 470"
+          stroke-width="46"/>
+    <path d="M 512 660 L 512 800" stroke-width="46"/>
+  </g>
+
+  <circle cx="512" cy="840" r="26" fill="url(#glyph)"/>
+</svg>

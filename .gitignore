@@ -13,6 +13,10 @@ target
 # Contains mutation testing data
 **/mutants.out*/
 
+# Tauri: schemas regenerated from the installed CLI/plugin versions before
+# each build; mobile scaffolding (unused here) also lands under gen/.
+**/src-tauri/gen/
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
