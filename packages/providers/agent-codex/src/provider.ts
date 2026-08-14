@@ -353,6 +353,9 @@ export class CodexAgentProvider implements AgentProvider {
       // session) and rejects them as unknown flags.
       if (request.workspace?.path !== undefined) args.push('-C', request.workspace.path)
       args.push('--sandbox', this.sandboxMode)
+      // Overture owns workspace isolation; without this, codex refuses to
+      // run in non-git directories (e.g. temp-directory sandboxes).
+      args.push('--skip-git-repo-check')
     }
     if (request.model !== undefined) args.push('-m', request.model)
     args.push(...this.extraArgs)

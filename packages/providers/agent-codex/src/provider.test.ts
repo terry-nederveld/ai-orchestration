@@ -247,6 +247,7 @@ describe('CodexAgentProvider.start', () => {
     expect(args[args.indexOf('-C') + 1]).toBe('/work')
     expect(args).toContain('--sandbox')
     expect(args[args.indexOf('--sandbox') + 1]).toBe('read-only')
+    expect(args).toContain('--skip-git-repo-check')
   })
 })
 
@@ -262,6 +263,7 @@ describe('CodexAgentProvider.resume', () => {
     expect(args.slice(0, 4)).toEqual(['exec', 'resume', 'thread-old', '--json'])
     expect(args).not.toContain('-C')
     expect(args).not.toContain('--sandbox')
+    expect(args).not.toContain('--skip-git-repo-check')
   })
 })
 
