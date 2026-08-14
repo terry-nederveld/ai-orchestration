@@ -141,6 +141,10 @@ apps/
   work-item transition wastes one redundant re-run (fails visibly on the
   non-fast-forward push; no corruption). Planned: pre-delivery
   existing-branch/PR check (ADR-0007 consequences).
+- Dependabot alert GHSA-wrw7-89jp-8q8g (glib VariantStrIter unsoundness,
+  transitive via Tauri's GTK bindings) dismissed as tolerable risk: no
+  patched version reachable from Tauri 2.x's tree; revisit when Tauri
+  adopts the gtk-rs 0.20 stack.
 
 ## Important Constraints
 
