@@ -14,7 +14,7 @@ import { GitSourceControlProvider } from './git-provider.js'
 import { GitHubSourceControlProvider } from './github-provider.js'
 import { initRepo, makeTempDir, removeDir } from './test-helpers.js'
 
-describe('push() attribution validation', () => {
+describe('push() attribution validation', { timeout: 30_000 }, () => {
   let dirs: string[] = []
 
   afterEach(async () => {

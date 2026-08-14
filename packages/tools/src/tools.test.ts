@@ -158,14 +158,14 @@ describe('run_command tool', () => {
 
 describe('environment hygiene', () => {
   it('does not leak daemon environment variables into commands', async () => {
-    process.env['OVERTURE_TEST_SECRET'] = 'sk-super-secret'
+    process.env.OVERTURE_TEST_SECRET = 'sk-super-secret'
     try {
       const tool = createRunCommandTool()
       const result = await tool.execute({ command: 'env' }, context())
       expect(result.content).not.toContain('sk-super-secret')
       expect(result.content).toContain('PATH=')
     } finally {
-      delete process.env['OVERTURE_TEST_SECRET']
+      delete process.env.OVERTURE_TEST_SECRET
     }
   })
 

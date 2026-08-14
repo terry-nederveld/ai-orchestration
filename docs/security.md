@@ -30,12 +30,15 @@ the vendor CLIs you have logged into are trusted.
   configured permissions at all, or when you explicitly set
   `permissions.preset: workspace-coding`; any explicit permissions
   configuration disables it so `defaultEffect: deny` genuinely denies.
-- **Environment hygiene.** Commands spawned in workspaces receive an
-  allowlisted environment (PATH, HOME, locale, temp) plus values you pass
-  explicitly — never the daemon's ambient environment, so operator API
-  keys and cloud credentials are not inherited by untrusted build scripts.
-  If a build needs a variable such as `JAVA_HOME`, pass it via the step's
-  `env:`.
+- **Environment hygiene.** Commands spawned in workspaces — by the native
+  runtime's shell tool, workflow command steps, and the external coding
+  agents (Claude Code, Codex, Copilot) alike — receive an allowlisted
+  environment (PATH, HOME, XDG, locale, temp) plus values passed
+  explicitly, never the daemon's ambient environment, so operator API
+  keys and cloud credentials are not inherited by untrusted code. The
+  HOME/XDG allowance is what lets vendor CLIs reach their own stored
+  login state. If a build needs a variable such as `JAVA_HOME`, pass it
+  via the step's `env:`.
 - **Secret redaction.** Secret values resolved from the store are tracked
   (including base64/URI/JSON-escaped forms) and scrubbed from console
   logs, the persisted event log, the SSE stream, and session snapshots.

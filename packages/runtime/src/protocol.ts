@@ -68,14 +68,14 @@ export interface CompleteGoalInput {
 
 export function parseCompleteGoal(input: unknown): CompleteGoalInput {
   const record = (input ?? {}) as Record<string, unknown>
-  const outcome = record['outcome'] === 'blocked' ? 'blocked' : 'completed'
-  const summary = typeof record['summary'] === 'string' ? record['summary'] : ''
+  const outcome = record.outcome === 'blocked' ? 'blocked' : 'completed'
+  const summary = typeof record.summary === 'string' ? record.summary : ''
   return { outcome, summary }
 }
 
 export function parseReason(input: unknown): string {
   const record = (input ?? {}) as Record<string, unknown>
-  return typeof record['reason'] === 'string' ? record['reason'] : 'human input requested'
+  return typeof record.reason === 'string' ? record.reason : 'human input requested'
 }
 
 /** Standing instructions appended to every native-runtime system prompt. */

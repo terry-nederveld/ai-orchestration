@@ -19,15 +19,15 @@ function assertAction(): WorkflowAction {
   return {
     id: 'workflow.assert',
     async execute(args) {
-      const condition = args['condition']
+      const condition = args.condition
       if (condition === undefined) {
         throw new OrchestratorError('workflow.assert requires a condition', 'invalid-input')
       }
       const satisfied = condition === 'true' || condition === true
       if (!satisfied) {
         const message =
-          typeof args['message'] === 'string'
-            ? args['message']
+          typeof args.message === 'string'
+            ? args.message
             : `assertion failed: condition evaluated to ${String(condition)}`
         throw new OrchestratorError(message, 'invalid-input')
       }

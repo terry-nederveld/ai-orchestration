@@ -25,6 +25,7 @@ import {
   type ProviderInfo,
 } from '@overture/core'
 import { AsyncQueue } from '@overture/runtime'
+import { sandboxedEnv } from '@overture/tools'
 import {
   fromAssistantMessage,
   fromUserMessage,
@@ -302,15 +303,17 @@ export class ClaudeCodeAgentProvider implements AgentProvider {
   }
 
   private async resolveEnv(): Promise<Record<string, string | undefined>> {
+    // Allowlisted base only (ADR-0016): the agent's internal tool loop runs
+    // untrusted-content-driven commands, so the daemon's ambient environment
+    // (operator credentials) must never be inherited. The allowlist keeps
+    // HOME/XDG so the CLI can reach its own stored auth state.
     if (this.auth.kind === 'api-key') {
       const key = await this.auth.apiKey()
       if (!key) throw new OrchestratorError('Anthropic API key not configured', 'auth-expired')
-      return { ...process.env, ANTHROPIC_API_KEY: key }
+      return sandboxedEnv({ ANTHROPIC_API_KEY: key })
     }
-    // cli-session: strip any ambient ANTHROPIC_API_KEY so it can never
-    // silently override the CLI's stored subscription credentials.
-    const env = { ...process.env }
-    delete env.ANTHROPIC_API_KEY
-    return env
+    // cli-session: no ambient ANTHROPIC_API_KEY can leak in (the allowlist
+    // excludes it), so the CLI's stored subscription credentials always win.
+    return sandboxedEnv()
   }
 }

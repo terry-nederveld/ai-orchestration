@@ -16,7 +16,7 @@ export interface DaemonInfo {
 }
 
 export function defaultStateDir(): string {
-  const xdg = process.env['XDG_STATE_HOME']
+  const xdg = process.env.XDG_STATE_HOME
   return join(xdg && xdg.length > 0 ? xdg : join(homedir(), '.local', 'state'), 'overture')
 }
 

@@ -13,7 +13,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import {
-  asId,
   type IdGenerator,
   InMemoryEventBus,
   noopLogger,

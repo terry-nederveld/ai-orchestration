@@ -301,6 +301,9 @@ importers:
       '@overture/runtime':
         specifier: workspace:*
         version: link:../../runtime
+      '@overture/tools':
+        specifier: workspace:*
+        version: link:../../tools
     devDependencies:
       '@overture/testkit':
         specifier: workspace:*
@@ -320,6 +323,9 @@ importers:
       '@overture/runtime':
         specifier: workspace:*
         version: link:../../runtime
+      '@overture/tools':
+        specifier: workspace:*
+        version: link:../../tools
     devDependencies:
       '@overture/testkit':
         specifier: workspace:*
@@ -339,6 +345,9 @@ importers:
       '@overture/runtime':
         specifier: workspace:*
         version: link:../../runtime
+      '@overture/tools':
+        specifier: workspace:*
+        version: link:../../tools
     devDependencies:
       '@overture/testkit':
         specifier: workspace:*

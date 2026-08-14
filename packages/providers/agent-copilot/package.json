@@ -19,7 +19,8 @@
   },
   "dependencies": {
     "@overture/core": "workspace:*",
-    "@overture/runtime": "workspace:*"
+    "@overture/runtime": "workspace:*",
+    "@overture/tools": "workspace:*"
   },
   "devDependencies": {
     "@overture/testkit": "workspace:*",

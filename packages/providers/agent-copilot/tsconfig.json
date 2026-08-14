@@ -4,7 +4,17 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "references": [{ "path": "../../core" }, { "path": "../../runtime" }],
+  "references": [
+    {
+      "path": "../../core"
+    },
+    {
+      "path": "../../runtime"
+    },
+    {
+      "path": "../../tools"
+    }
+  ],
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"]
 }

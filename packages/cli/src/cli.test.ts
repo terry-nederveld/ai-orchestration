@@ -46,7 +46,8 @@ describe('DaemonClient', () => {
     const result = await client.get<{ ok: boolean }>('/api/status')
     expect(result.ok).toBe(true)
     expect(calls[0]?.url).toBe('http://127.0.0.1:9/api/status')
-    expect((calls[0]?.init?.headers as Record<string, string>).authorization).toBe('Bearer secret')
+    const headers = (calls[0]?.init?.headers ?? {}) as Record<string, string>
+    expect(headers.authorization).toBe('Bearer secret')
   })
 
   it('maps API errors with server-provided messages', async () => {

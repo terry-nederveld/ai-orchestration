@@ -298,3 +298,22 @@ describe('CodexAgentProvider.detect', () => {
     expect(availability).toMatchObject({ installed: true, authenticated: true, available: true })
   })
 })
+
+describe('environment hygiene (ADR-0016)', () => {
+  it('does not inherit ambient daemon environment variables', async () => {
+    process.env.OVERTURE_AMBIENT_SECRET = 'leak-me'
+    try {
+      const { spawner, calls, child } = fakeSpawner()
+      const provider = new CodexAgentProvider({ auth: { kind: 'cli-session' }, spawner })
+      const handle = await provider.start(baseRequest())
+      child.emitClose(0)
+      await handle.result()
+      const env = calls[0]?.options.env ?? {}
+      expect(env.OVERTURE_AMBIENT_SECRET).toBeUndefined()
+      expect(env.PATH).toBeDefined()
+      expect(env.HOME).toBeDefined()
+    } finally {
+      delete process.env.OVERTURE_AMBIENT_SECRET
+    }
+  })
+})

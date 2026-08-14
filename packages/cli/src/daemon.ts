@@ -63,7 +63,7 @@ class ConsoleLogger implements Logger {
   }
 
   debug(message: string, fields?: Record<string, unknown>): void {
-    if (process.env['OVERTURE_DEBUG']) this.write('DEBUG', message, fields)
+    if (process.env.OVERTURE_DEBUG) this.write('DEBUG', message, fields)
   }
   info(message: string, fields?: Record<string, unknown>): void {
     this.write('INFO', message, fields)
@@ -372,7 +372,7 @@ export async function assembleDaemon(options: {
           site: source.baseUrl ?? '',
           auth: async () => {
             const value = await token()
-            const email = (source.options['email'] as string | undefined) ?? ''
+            const email = (source.options.email as string | undefined) ?? ''
             return value ? { email, apiToken: value } : undefined
           },
           ...(source.container ? { projectKey: source.container } : {}),

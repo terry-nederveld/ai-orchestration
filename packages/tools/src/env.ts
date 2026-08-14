@@ -24,7 +24,7 @@ const DEFAULT_ALLOWED = [
   'PATHEXT',
 ] as const
 
-const ALLOWED_PREFIXES = ['LC_'] as const
+const ALLOWED_PREFIXES = ['LC_', 'XDG_'] as const
 
 /**
  * Build a minimal child environment from the daemon's own: allowlisted

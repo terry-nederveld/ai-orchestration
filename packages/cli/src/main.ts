@@ -6,7 +6,7 @@
 
 import { readFile } from 'node:fs/promises'
 import { loadConfig, validateConfigObject } from '@overture/config'
-import { EncryptedFileSecretProvider, resolveSecretProvider } from '@overture/secrets'
+import { resolveSecretProvider } from '@overture/secrets'
 import { defaultStateDir } from '@overture/server'
 import { parse as parseYaml } from 'yaml'
 import { ApiError, connect, DaemonClient, DaemonUnavailableError } from './client.js'
@@ -99,7 +99,7 @@ const commands: Record<string, { description: string; run: Command }> = {
           `/api/runs/${encodeURIComponent(id)}/events`,
         )
         for (const event of events) {
-          console.log(`${formatDate(event['at'])}  ${String(event['type'])}`)
+          console.log(`${formatDate(event.at)}  ${String(event.type)}`)
         }
         return 0
       }
@@ -304,7 +304,7 @@ const commands: Record<string, { description: string; run: Command }> = {
       console.error('following events (ctrl-c to stop)…')
       await client.follow(
         (event) => {
-          console.log(`${formatDate(event['at'])}  ${String(event['type'])}`)
+          console.log(`${formatDate(event.at)}  ${String(event.type)}`)
         },
         runId ? { runId } : {},
       )

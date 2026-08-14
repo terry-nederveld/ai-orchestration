@@ -20,6 +20,7 @@ import {
   type ProviderInfo,
 } from '@overture/core'
 import { AsyncQueue } from '@overture/runtime'
+import { sandboxedEnv } from '@overture/tools'
 import {
   type CodexEvent,
   type CodexItem,
@@ -364,15 +365,16 @@ export class CodexAgentProvider implements AgentProvider {
   }
 
   private async resolveEnv(): Promise<NodeJS.ProcessEnv> {
+    // Allowlisted base only (ADR-0016): codex's internal tool loop executes
+    // untrusted-content-driven commands; the daemon's ambient environment
+    // must never be inherited. HOME/XDG stay so ~/.codex auth resolves.
     if (this.auth.kind === 'api-key') {
       const key = await this.auth.apiKey()
       if (!key) throw new OrchestratorError('OpenAI API key not configured', 'auth-expired')
-      return { ...process.env, OPENAI_API_KEY: key }
+      return sandboxedEnv({ OPENAI_API_KEY: key })
     }
-    // cli-session: strip any ambient OPENAI_API_KEY so it can never silently
-    // override the CLI's stored ChatGPT login.
-    const env = { ...process.env }
-    delete env.OPENAI_API_KEY
-    return env
+    // cli-session: no ambient OPENAI_API_KEY can leak in (allowlist excludes
+    // it), so the stored ChatGPT login always wins.
+    return sandboxedEnv()
   }
 }

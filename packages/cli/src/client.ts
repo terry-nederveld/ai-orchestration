@@ -59,7 +59,7 @@ export class DaemonClient {
     })
     const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>
     if (!response.ok) {
-      const message = typeof payload['error'] === 'string' ? payload['error'] : response.statusText
+      const message = typeof payload.error === 'string' ? payload.error : response.statusText
       throw new ApiError(response.status, message)
     }
     return payload as T

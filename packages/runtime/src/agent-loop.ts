@@ -602,8 +602,8 @@ export class NativeAgentRuntime implements AgentRuntime {
     emit: (event: AgentEvent) => void,
   ): Promise<{ result: AgentResult; usage: TokenUsage }> {
     const record = (input ?? {}) as Record<string, unknown>
-    const goal = typeof record['goal'] === 'string' ? record['goal'] : ''
-    const context = typeof record['context'] === 'string' ? record['context'] : undefined
+    const goal = typeof record.goal === 'string' ? record.goal : ''
+    const context = typeof record.context === 'string' ? record.context : undefined
     const childSessionId: SessionId = asId(
       `${String(parent.sessionId)}.sub${this.clock.now().getTime()}`,
     )

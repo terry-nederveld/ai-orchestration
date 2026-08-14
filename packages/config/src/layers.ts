@@ -54,7 +54,7 @@ export function mergeLayers(
 
 /** Default locations. XDG-style on every platform, intentionally boring. */
 export function defaultUserConfigPath(): string {
-  const xdg = process.env['XDG_CONFIG_HOME']
+  const xdg = process.env.XDG_CONFIG_HOME
   return join(xdg && xdg.length > 0 ? xdg : join(homedir(), '.config'), 'overture', 'config.yaml')
 }
 

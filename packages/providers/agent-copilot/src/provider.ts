@@ -25,6 +25,7 @@ import {
   type ProviderInfo,
 } from '@overture/core'
 import { AsyncQueue } from '@overture/runtime'
+import { sandboxedEnv } from '@overture/tools'
 import { defaultSpawner, type Spawner } from './process.js'
 
 export type CopilotAuth =
@@ -240,12 +241,15 @@ export class CopilotAgentProvider implements AgentProvider {
   }
 
   private async resolveEnv(): Promise<NodeJS.ProcessEnv> {
+    // Allowlisted base only (ADR-0016): the daemon's ambient environment is
+    // never inherited. HOME stays so the gh/Copilot stored session resolves;
+    // an ambient GH_TOKEN/COPILOT_GITHUB_TOKEN is deliberately NOT inherited
+    // — configure token auth explicitly instead.
     if (this.auth.kind === 'api-key') {
       const token = await this.auth.apiKey()
       if (!token) throw new OrchestratorError('GitHub Copilot token not configured', 'auth-expired')
-      return { ...process.env, COPILOT_GITHUB_TOKEN: token }
+      return sandboxedEnv({ COPILOT_GITHUB_TOKEN: token })
     }
-    // cli-session: rely on the ambient `gh`/Copilot CLI session as-is.
-    return { ...process.env }
+    return sandboxedEnv()
   }
 }

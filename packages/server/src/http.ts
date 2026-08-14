@@ -5,7 +5,7 @@
  */
 
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { Logger } from '@overture/core'
 import { noopLogger } from '@overture/core'
 import type { OvertureService } from './service.js'
@@ -204,7 +204,7 @@ async function route(
     const body = await readJson(request)
     const approved =
       body !== null && typeof body === 'object' && 'approved' in body
-        ? Boolean((body as Record<string, unknown>)['approved'])
+        ? Boolean((body as Record<string, unknown>).approved)
         : false
     const approvalId = decodeId(approvalMatch[1])
     if (!approvalId) {
