@@ -10,7 +10,7 @@
  * orchestrator treats them uniformly.
  */
 
-import type { TokenUsage, UsageRecord } from './budget.js'
+import type { BudgetLimits, TokenUsage, UsageRecord } from './budget.js'
 import type { CapabilitySet, ProviderAvailability, ProviderInfo } from './capabilities.js'
 import type { RunId, SessionId } from './ids.js'
 import type { Workspace } from './workspace.js'
@@ -45,6 +45,8 @@ export interface AgentRunRequest {
   readonly toolNames?: readonly string[]
   readonly maxTurns?: number
   readonly timeoutMs?: number
+  /** Per-run consumption bounds enforced by the executing runtime. */
+  readonly limits?: BudgetLimits
   readonly metadata?: Readonly<Record<string, string>>
 }
 

@@ -1,8 +1,8 @@
 {
-  "name": "@overture/core",
+  "name": "@overture/tools",
   "version": "0.1.0",
   "private": true,
-  "description": "Overture domain model, provider contracts, and event definitions",
+  "description": "Overture built-in coding tools: filesystem, search, and command execution",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -15,7 +15,10 @@
   },
   "scripts": {
     "build": "tsc --build",
-    "test": "vitest run --root ../.. --project @overture/core"
+    "test": "vitest run --root ../.. --project @overture/tools"
+  },
+  "dependencies": {
+    "@overture/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.9.2",
