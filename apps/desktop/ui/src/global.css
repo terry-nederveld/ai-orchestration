@@ -1,0 +1,203 @@
+/* Overture design tokens — refined dark UI for a developer tool. */
+
+:root {
+  /* Surfaces */
+  --color-bg: #0b0e14;
+  --color-bg-elevated: #12161f;
+  --color-bg-elevated-2: #171c27;
+  --color-bg-hover: #1c222e;
+  --color-bg-active: #222939;
+  --color-border: #232a38;
+  --color-border-strong: #303a4d;
+
+  /* Text */
+  --color-text: #e7ebf3;
+  --color-text-muted: #9aa4b8;
+  --color-text-faint: #656f84;
+  --color-text-on-accent: #071018;
+
+  /* Accent */
+  --color-accent: #4fd1c5;
+  --color-accent-hover: #6ee0d5;
+  --color-accent-muted: rgba(79, 209, 197, 0.14);
+  --color-accent-border: rgba(79, 209, 197, 0.4);
+
+  /* Semantic */
+  --color-danger: #f0655f;
+  --color-danger-muted: rgba(240, 101, 95, 0.14);
+  --color-danger-border: rgba(240, 101, 95, 0.4);
+  --color-warning: #e0a750;
+  --color-warning-muted: rgba(224, 167, 80, 0.14);
+  --color-success: #59c47c;
+  --color-success-muted: rgba(89, 196, 124, 0.14);
+
+  /* Run-state colors */
+  --state-queued: #7b8496;
+  --state-queued-bg: rgba(123, 132, 150, 0.16);
+  --state-running: #5b9df0;
+  --state-running-bg: rgba(91, 157, 240, 0.16);
+  --state-waiting: #e0a750;
+  --state-waiting-bg: rgba(224, 167, 80, 0.16);
+  --state-verifying: #b285e8;
+  --state-verifying-bg: rgba(178, 133, 232, 0.16);
+  --state-completed: #59c47c;
+  --state-completed-bg: rgba(89, 196, 124, 0.16);
+  --state-failed: #f0655f;
+  --state-failed-bg: rgba(240, 101, 95, 0.16);
+  --state-blocked: #e08a4f;
+  --state-blocked-bg: rgba(224, 138, 79, 0.16);
+  --state-cancelled: #7b8496;
+  --state-cancelled-bg: rgba(123, 132, 150, 0.16);
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.32);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.42);
+
+  /* Motion */
+  --transition-fast: 120ms ease;
+  --transition-base: 200ms ease;
+
+  /* Type */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono:
+    "SF Mono", ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --sidebar-width: 220px;
+  --header-height: 56px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+code,
+pre,
+kbd,
+.mono {
+  font-family: var(--font-mono);
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--color-accent-hover);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+p {
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: var(--color-accent-muted);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: var(--radius-full);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

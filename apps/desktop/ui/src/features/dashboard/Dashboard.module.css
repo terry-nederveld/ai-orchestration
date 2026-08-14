@@ -1,0 +1,98 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: var(--space-5);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.approvalRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.approvalRow:last-child {
+  border-bottom: none;
+}
+
+.approvalMeta {
+  min-width: 0;
+}
+
+.approvalCapability {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--color-text);
+}
+
+.approvalTarget {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approvalActions {
+  display: flex;
+  gap: var(--space-2);
+  flex: none;
+}
+
+.ticker {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.tickerRow {
+  display: grid;
+  grid-template-columns: 60px 1fr;
+  gap: var(--space-3);
+  padding: 6px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.tickerRow:last-child {
+  border-bottom: none;
+}
+
+.tickerTime {
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+}
+
+.tickerText {
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.tickerText strong {
+  color: var(--color-text);
+  font-weight: 600;
+}

@@ -1,0 +1,80 @@
+.list {
+  display: flex;
+  flex-direction: column;
+}
+
+.item {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  gap: var(--space-3);
+  padding-bottom: var(--space-5);
+  position: relative;
+}
+
+.item:last-child {
+  padding-bottom: 0;
+}
+
+.rail {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.rail::before {
+  content: "";
+  position: absolute;
+  top: 18px;
+  bottom: -20px;
+  width: 2px;
+  background: var(--color-border);
+}
+
+.item:last-child .rail::before {
+  display: none;
+}
+
+.dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border-strong);
+  background: var(--color-bg-elevated);
+  z-index: 1;
+  flex: none;
+}
+
+.dot.running {
+  border-color: var(--state-running);
+  background: var(--state-running-bg);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.dot.succeeded {
+  border-color: var(--state-completed);
+  background: var(--state-completed-bg);
+}
+.dot.failed {
+  border-color: var(--state-failed);
+  background: var(--state-failed-bg);
+}
+.dot.skipped {
+  border-color: var(--color-text-faint);
+  background: var(--color-bg-active);
+}
+
+.content {
+  padding-top: 1px;
+}
+
+.stepId {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.meta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}

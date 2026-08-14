@@ -1,0 +1,48 @@
+.tile {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-faint);
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.value {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
+}
+
+.tone-danger .value {
+  color: var(--color-danger);
+}
+.tone-warning .value {
+  color: var(--color-warning);
+}
+.tone-success .value {
+  color: var(--color-success);
+}
+.tone-accent .value {
+  color: var(--color-accent);
+}
+
+.sub {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}

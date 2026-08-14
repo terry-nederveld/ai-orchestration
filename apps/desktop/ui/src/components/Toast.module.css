@@ -1,0 +1,55 @@
+.viewport {
+  position: fixed;
+  bottom: var(--space-5);
+  right: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  z-index: 1000;
+  width: 320px;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated-2);
+  border: 1px solid var(--color-border-strong);
+  box-shadow: var(--shadow-lg);
+  animation: toast-in 160ms ease;
+  font-size: 13px;
+}
+
+.toast.error {
+  border-color: var(--color-danger-border);
+}
+.toast.success {
+  border-color: var(--color-success);
+}
+
+.icon {
+  flex: none;
+  margin-top: 1px;
+}
+
+.message {
+  flex: 1;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.close {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--color-text-faint);
+  cursor: pointer;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+}
+.close:hover {
+  color: var(--color-text);
+}
