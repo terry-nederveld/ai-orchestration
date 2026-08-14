@@ -1,11 +1,6 @@
 import type { Clock, CommandStep, StepKind, WorkflowDefinition } from '@overture/core'
 import { describe, expect, it } from 'vitest'
-import {
-  type StepExecutionState,
-  type StepExecutorFn,
-  WorkflowEngine,
-  type WorkflowEngineEvent,
-} from './engine.js'
+import { type StepExecutorFn, WorkflowEngine, type WorkflowEngineEvent } from './engine.js'
 import { getBuiltinSoftwareDevelopmentWorkflow } from './providers.js'
 
 function step(overrides: Partial<CommandStep> & { id: string }): CommandStep {
@@ -499,17 +494,20 @@ describe('WorkflowEngine transitions', () => {
 })
 
 describe('WorkflowEngine running the built-in software-development workflow', () => {
-  // approve_delivery is `when: 'true'` (always eligible) precisely so its own decision —
-  // not a benign `when`-skip — is what carries a genuine "nothing worked" outcome. This
-  // mirrors what a real approval executor would do: approve if review passed directly or
-  // remediation actually fixed things, reject otherwise.
-  function approvalDecision(): StepExecutorFn {
-    return async (_step, state: StepExecutionState) => {
-      const reviewOk = state.stepResults.get('review')?.status === 'succeeded'
-      const reReviewOk = state.stepResults.get('re_review')?.status === 'succeeded'
-      return reviewOk || reReviewOk
-        ? { status: 'succeeded' }
-        : { status: 'failed', error: 'neither review nor remediation succeeded' }
+  // ensure_validated is `action: workflow.assert`, `when: 'true'` (always eligible)
+  // precisely so its own real success/failure — not a benign `when`-skip — is what
+  // carries a genuine "nothing worked" outcome. This scripted executor mirrors the
+  // real `workflow.assert` action (packages/orchestrator/src/actions.ts): fail unless
+  // the (already-interpolated, by the engine) `with.condition` is the string 'true'.
+  function assertExecutor(): StepExecutorFn {
+    return async (step) => {
+      const condition = step.kind === 'action' ? step.with?.condition : undefined
+      if (condition === 'true') return { status: 'succeeded' }
+      const message =
+        step.kind === 'action' && typeof step.with?.message === 'string'
+          ? step.with.message
+          : 'assertion failed'
+      return { status: 'failed', error: message }
     }
   }
 
@@ -522,13 +520,13 @@ describe('WorkflowEngine running the built-in software-development workflow', ()
         implement: ok(),
         test: ok(),
         review: ok(),
-        approve_delivery: approvalDecision(),
+        ensure_validated: assertExecutor(),
         deliver: ok(),
       }),
     })
     expect(result.stepResults.get('remediate')?.status).toBe('skipped')
     expect(result.stepResults.get('re_review')?.status).toBe('skipped')
-    expect(result.stepResults.get('approve_delivery')?.status).toBe('succeeded')
+    expect(result.stepResults.get('ensure_validated')?.status).toBe('succeeded')
     expect(result.stepResults.get('deliver')?.status).toBe('succeeded')
     expect(result.status).toBe('succeeded')
     expect(result.transition).toBe('success')
@@ -546,14 +544,14 @@ describe('WorkflowEngine running the built-in software-development workflow', ()
         review: fail('found issues'),
         remediate: ok(),
         re_review: ok(),
-        approve_delivery: approvalDecision(),
+        ensure_validated: assertExecutor(),
         deliver: ok(),
       }),
     })
     expect(result.stepResults.get('review')?.status).toBe('failed')
     expect(result.stepResults.get('remediate')?.status).toBe('succeeded')
     expect(result.stepResults.get('re_review')?.status).toBe('succeeded')
-    expect(result.stepResults.get('approve_delivery')?.status).toBe('succeeded')
+    expect(result.stepResults.get('ensure_validated')?.status).toBe('succeeded')
     expect(result.stepResults.get('deliver')?.status).toBe('succeeded')
     expect(result.status).toBe('succeeded')
   })
@@ -568,7 +566,7 @@ describe('WorkflowEngine running the built-in software-development workflow', ()
         test: ok(),
         review: fail('found issues'),
         remediate: fail('could not fix it'),
-        approve_delivery: approvalDecision(),
+        ensure_validated: assertExecutor(),
         deliver: ok(),
       }),
     })
@@ -576,9 +574,50 @@ describe('WorkflowEngine running the built-in software-development workflow', ()
     expect(result.stepResults.get('remediate')?.status).toBe('failed')
     // re_review's `when` (steps.remediate.succeeded) is false: a benign skip.
     expect(result.stepResults.get('re_review')?.status).toBe('skipped')
-    // approve_delivery always runs (when: 'true') and genuinely rejects here — a real
-    // failure, not a skip, so it taints deliver's default-rule dependency on it.
-    expect(result.stepResults.get('approve_delivery')?.status).toBe('failed')
+    // ensure_validated always runs (when: 'true') and its assert genuinely fails here
+    // (condition interpolates to 'false') — a real failure, not a skip, so it taints
+    // deliver's default-rule dependency on it.
+    expect(result.stepResults.get('ensure_validated')).toMatchObject({
+      status: 'failed',
+      error: 'neither review nor re-review succeeded',
+    })
+    expect(result.stepResults.get('deliver')?.status).toBe('skipped')
+    expect(result.status).toBe('failed')
+    expect(result.transition).toBe('failure')
+    expect(result.transitionTarget).toBe('Agent Failed')
+  })
+
+  it('still fails the workflow when an early step (implement) fails, before review even runs', async () => {
+    const definition = getBuiltinSoftwareDevelopmentWorkflow()
+    const engine = new WorkflowEngine()
+    const result = await engine.execute(definition, {
+      executors: executors({
+        analyze: ok({ title: 'Fix the bug', plan: 'do it' }),
+        implement: fail('could not implement the plan'),
+        test: ok(),
+        review: ok(),
+        ensure_validated: assertExecutor(),
+        deliver: ok(),
+      }),
+    })
+    expect(result.stepResults.get('implement')?.status).toBe('failed')
+    expect(result.stepResults.get('test')?.status).toBe('skipped')
+    expect(result.stepResults.get('review')?.status).toBe('skipped')
+    // remediate/re_review are `when`-gated on review's *status*; review itself never
+    // ran (it was skipped, not failed), so their `when` is false too — benign skips.
+    expect(result.stepResults.get('remediate')?.status).toBe('skipped')
+    expect(result.stepResults.get('re_review')?.status).toBe('skipped')
+    // ensure_validated is `when: 'true'`, so it runs for real regardless of what
+    // happened upstream (depends_on only gates ordering here). Its condition
+    // (`steps.review.succeeded || steps.re_review.succeeded`) interpolates to
+    // 'false' — review and re_review are both 'skipped', neither 'succeeded' — so
+    // the assert genuinely fails: a real failure, not a skip.
+    expect(result.stepResults.get('ensure_validated')).toMatchObject({
+      status: 'failed',
+      error: 'neither review nor re-review succeeded',
+    })
+    // deliver's plain depends_on: [ensure_validated] sees a real (non-forgiven)
+    // failure, so it's a tainted skip, and it's the terminal step.
     expect(result.stepResults.get('deliver')?.status).toBe('skipped')
     expect(result.status).toBe('failed')
     expect(result.transition).toBe('failure')

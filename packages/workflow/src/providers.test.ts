@@ -99,7 +99,7 @@ describe('built-in software-development workflow', () => {
       'review',
       'remediate',
       're_review',
-      'approve_delivery',
+      'ensure_validated',
       'deliver',
     ])
   })
