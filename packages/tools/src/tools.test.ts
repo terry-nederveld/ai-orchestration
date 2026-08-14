@@ -155,3 +155,47 @@ describe('run_command tool', () => {
     expect(result.content).toContain(realRoot)
   })
 })
+
+describe('environment hygiene', () => {
+  it('does not leak daemon environment variables into commands', async () => {
+    process.env['OVERTURE_TEST_SECRET'] = 'sk-super-secret'
+    try {
+      const tool = createRunCommandTool()
+      const result = await tool.execute({ command: 'env' }, context())
+      expect(result.content).not.toContain('sk-super-secret')
+      expect(result.content).toContain('PATH=')
+    } finally {
+      delete process.env['OVERTURE_TEST_SECRET']
+    }
+  })
+
+  it('passes explicitly provided env through', async () => {
+    const tool = createRunCommandTool({ env: { OVERTURE_EXPLICIT: 'yes' } })
+    const result = await tool.execute({ command: 'echo $OVERTURE_EXPLICIT' }, context())
+    expect(result.content).toContain('yes')
+  })
+})
+
+describe('symlink containment', () => {
+  it('rejects reads through a workspace-internal symlink pointing outside', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'overture-outside-'))
+    try {
+      await writeFile(join(outside, 'secret.txt'), 'outside data')
+      const { symlink } = await import('node:fs/promises')
+      await symlink(outside, join(root, 'escape'))
+      await expect(readFileTool.execute({ path: 'escape/secret.txt' }, context())).rejects.toThrow(
+        PathEscapeError,
+      )
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('allows symlinks that stay inside the workspace', async () => {
+    await writeFileTool.execute({ path: 'real.txt', content: 'inside' }, context())
+    const { symlink } = await import('node:fs/promises')
+    await symlink(join(root, 'real.txt'), join(root, 'link.txt'))
+    const result = await readFileTool.execute({ path: 'link.txt' }, context())
+    expect(result.content).toContain('inside')
+  })
+})

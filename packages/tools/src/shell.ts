@@ -6,6 +6,7 @@
 
 import { spawn } from 'node:child_process'
 import { PermissionCapability, type Tool } from '@overture/core'
+import { sandboxedEnv } from './env.js'
 import { containedPath, workspaceRoot } from './paths.js'
 
 const MAX_OUTPUT_CHARS = 30_000
@@ -53,7 +54,7 @@ export function createRunCommandTool(options: RunCommandOptions = {}): Tool {
         const args = process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-c', command]
         const child = spawn(shell, args, {
           cwd: workdir,
-          env: { ...process.env, ...options.env },
+          env: sandboxedEnv(options.env),
           stdio: ['ignore', 'pipe', 'pipe'],
         })
         let stdout = ''

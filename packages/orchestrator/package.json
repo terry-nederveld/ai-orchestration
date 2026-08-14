@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@overture/core": "workspace:*",
+    "@overture/tools": "workspace:*",
     "@overture/workflow": "workspace:*"
   },
   "devDependencies": {

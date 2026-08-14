@@ -97,7 +97,7 @@ describe('control plane', () => {
     const actions = new WorkflowActionRegistry()
     actions.register(builtinActionFactory)
     const coordinator = new RunCoordinator({
-      work,
+      work: { resolve: () => work },
       workspaces: { resolve: () => workspaces },
       agents: {
         resolve: async () => ({
@@ -116,7 +116,7 @@ describe('control plane', () => {
       claimant: 'test',
     })
     const scheduler = new Scheduler({
-      work,
+      sources: [{ provider: work }],
       workflows: new InMemoryWorkflowProvider([parseWorkflowYaml(WORKFLOW)]),
       coordinator,
       persistence,

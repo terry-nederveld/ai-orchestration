@@ -45,6 +45,12 @@ export interface ServiceStatus {
 
 export interface OvertureServiceDeps {
   readonly version: string
+  /**
+   * Applied to every event before it is persisted or delivered to
+   * subscribers (SSE included), scrubbing secret values (see the security
+   * review's SECRETS-PERSIST finding). Identity when omitted.
+   */
+  readonly redactEvent?: (event: OrchestratorEvent) => OrchestratorEvent
   readonly persistence: PersistenceProvider
   readonly events: EventBus
   readonly scheduler: Scheduler
@@ -65,9 +71,10 @@ export class OvertureService {
 
   constructor(private readonly deps: OvertureServiceDeps) {
     this.startedAt = deps.clock.now()
-    // Persist every bus event into the append-only event log.
+    // Persist every bus event into the append-only event log, redacted.
     this.unsubscribeEventLog = deps.events.subscribe({}, (event) => {
-      void deps.persistence.events.append(event).catch((error) => {
+      const sanitized = deps.redactEvent ? deps.redactEvent(event) : event
+      void deps.persistence.events.append(sanitized).catch((error) => {
         deps.logger.warn('event log append failed', {
           eventType: event.type,
           error: error instanceof Error ? error.message : String(error),
@@ -283,7 +290,9 @@ export class OvertureService {
   // ----- events ----------------------------------------------------------
 
   subscribe(handler: (event: OrchestratorEvent) => void, runId?: string): () => void {
-    return this.deps.events.subscribe(runId ? { runId: asId<'run'>(runId) } : {}, handler)
+    const redact = this.deps.redactEvent
+    const wrapped = redact ? (event: OrchestratorEvent) => handler(redact(event)) : handler
+    return this.deps.events.subscribe(runId ? { runId: asId<'run'>(runId) } : {}, wrapped)
   }
 
   async cancelAllActive(): Promise<void> {

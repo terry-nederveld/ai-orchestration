@@ -100,6 +100,15 @@ export const overtureConfigSchema = z
       .object({
         defaultEffect: z.enum(['allow', 'deny', 'ask', 'sandbox-only']).default('deny'),
         rules: z.array(permissionRuleSchema).default([]),
+        /**
+         * Named rule preset appended after configured rules. 'workspace-coding'
+         * allows the filesystem/process/git/issue capabilities a coding agent
+         * needs; 'none' leaves only configured rules and defaultEffect.
+         * Defaults to 'workspace-coding' ONLY when no rules and no explicit
+         * defaultEffect are configured; any explicit permissions config
+         * disables the implicit preset.
+         */
+        preset: z.enum(['workspace-coding', 'none']).optional(),
       })
       .strict()
       .default({ defaultEffect: 'deny', rules: [] }),

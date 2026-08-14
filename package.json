@@ -15,7 +15,8 @@
     "test:watch": "vitest",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "typecheck": "tsc --build"
+    "typecheck": "tsc --build",
+    "desktop:build": "pnpm --filter @overture/ui build && pnpm --filter @overture/desktop build"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.2.0",

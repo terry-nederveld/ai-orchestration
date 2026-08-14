@@ -4,6 +4,7 @@
  */
 
 import { spawn } from 'node:child_process'
+import { sandboxedEnv } from '@overture/tools'
 import type { CommandResult, CommandRunner } from './ports.js'
 
 const MAX_OUTPUT_CHARS = 60_000
@@ -24,7 +25,7 @@ export class DefaultCommandRunner implements CommandRunner {
       const args = process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-c', command]
       const child = spawn(this.shell, args, {
         cwd: options.cwd,
-        env: { ...process.env, ...options.env },
+        env: sandboxedEnv(options.env),
         stdio: ['ignore', 'pipe', 'pipe'],
       })
       let output = ''

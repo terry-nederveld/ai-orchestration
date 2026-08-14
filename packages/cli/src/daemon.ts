@@ -81,7 +81,7 @@ class ConsoleLogger implements Logger {
 
 class RandomIds implements IdGenerator {
   next(prefix: string): string {
-    return `${prefix}-${randomUUID().slice(0, 13)}`
+    return `${prefix}-${randomUUID()}`
   }
 }
 
@@ -121,7 +121,7 @@ export async function assembleDaemon(options: {
   const redactor = new SecretRedactor()
   const logger = new ConsoleLogger(redactor)
 
-  const { config } = await loadConfig({
+  const { config, layers } = await loadConfig({
     ...(options.projectDir ? { projectDir: options.projectDir } : {}),
   })
 
@@ -148,11 +148,22 @@ export async function assembleDaemon(options: {
     effect: rule.effect,
     ...(rule.target !== undefined ? { target: rule.target } : {}),
   }))
+  // The workspace-coding preset applies only when explicitly requested, or
+  // implicitly when the operator configured no permissions at all. Any
+  // explicit permissions configuration disables the implicit preset so a
+  // configured defaultEffect actually holds (security review finding
+  // POLICY-BYPASS-DEFAULT).
+  const operatorConfiguredPermissions = layers.some((layer) => 'permissions' in layer.values)
+  const presetRequested =
+    config.permissions.preset === 'workspace-coding' ||
+    (config.permissions.preset === undefined && !operatorConfiguredPermissions)
   const policy = new RuleBasedPolicyEngine({
-    // Configured rules take precedence; workspace coding defaults follow.
-    rules: [...configuredRules, ...workspaceCodingRules()],
+    rules: presetRequested ? [...configuredRules, ...workspaceCodingRules()] : configuredRules,
     defaultEffect: config.permissions.defaultEffect,
   })
+  if (presetRequested && operatorConfiguredPermissions) {
+    logger.info('workspace-coding permission preset enabled by explicit configuration')
+  }
 
   // ----- model providers -------------------------------------------------
   const { AnthropicModelProvider } = await import('@overture/model-anthropic')
@@ -281,7 +292,11 @@ export async function assembleDaemon(options: {
       policy,
       approvals,
       hooks,
-      sessions: persistence.sessions,
+      sessions: {
+        save: (snapshot) => persistence.sessions.save(redactor.redactObject(snapshot)),
+        get: (id) => persistence.sessions.get(id),
+        listForRun: (runId) => persistence.sessions.listForRun(runId),
+      },
       clock,
       logger: logger.child({ runtime: `native-${modelProvider.info.id}` }),
       resolveSecret,
@@ -490,6 +505,7 @@ export async function assembleDaemon(options: {
 
   const service = new OvertureService({
     version: VERSION,
+    redactEvent: (event) => redactor.redactObject(event),
     persistence,
     events,
     scheduler,

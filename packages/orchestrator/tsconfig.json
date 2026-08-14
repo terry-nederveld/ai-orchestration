@@ -4,7 +4,17 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "references": [{ "path": "../core" }, { "path": "../workflow" }],
+  "references": [
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../workflow"
+    },
+    {
+      "path": "../tools"
+    }
+  ],
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"]
 }

@@ -4,7 +4,7 @@
  * Binds to 127.0.0.1 only.
  */
 
-import { randomBytes } from 'node:crypto'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { Logger } from '@overture/core'
 import { noopLogger } from '@overture/core'
@@ -103,7 +103,12 @@ async function route(
 
   const runMatch = path.match(/^\/api\/runs\/([^/]+)$/)
   if (method === 'GET' && runMatch?.[1]) {
-    const run = await service.getRun(decodeURIComponent(runMatch[1]))
+    const runId = decodeId(runMatch[1])
+    if (!runId) {
+      sendJson(response, 400, { error: 'invalid run id' })
+      return
+    }
+    const run = await service.getRun(runId)
     if (!run) sendJson(response, 404, { error: 'run not found' })
     else sendJson(response, 200, run)
     return
@@ -112,20 +117,35 @@ async function route(
   const runEventsMatch = path.match(/^\/api\/runs\/([^/]+)\/events$/)
   if (method === 'GET' && runEventsMatch?.[1]) {
     const after = url.searchParams.get('after') ?? undefined
-    sendJson(response, 200, await service.runEvents(decodeURIComponent(runEventsMatch[1]), after))
+    const runId = decodeId(runEventsMatch[1])
+    if (!runId) {
+      sendJson(response, 400, { error: 'invalid run id' })
+      return
+    }
+    sendJson(response, 200, await service.runEvents(runId, after))
     return
   }
 
   const cancelMatch = path.match(/^\/api\/runs\/([^/]+)\/cancel$/)
   if (method === 'POST' && cancelMatch?.[1]) {
-    const cancelled = await service.cancelRun(decodeURIComponent(cancelMatch[1]))
+    const cancelId = decodeId(cancelMatch[1])
+    if (!cancelId) {
+      sendJson(response, 400, { error: 'invalid run id' })
+      return
+    }
+    const cancelled = await service.cancelRun(cancelId)
     sendJson(response, cancelled ? 200 : 409, { cancelled })
     return
   }
 
   const retryMatch = path.match(/^\/api\/runs\/([^/]+)\/retry$/)
   if (method === 'POST' && retryMatch?.[1]) {
-    sendJson(response, 200, await service.retryRun(decodeURIComponent(retryMatch[1])))
+    const retryId = decodeId(retryMatch[1])
+    if (!retryId) {
+      sendJson(response, 400, { error: 'invalid run id' })
+      return
+    }
+    sendJson(response, 200, await service.retryRun(retryId))
     return
   }
 
@@ -167,7 +187,7 @@ async function route(
     sendJson(
       response,
       200,
-      await service.listWorkItems(decodeURIComponent(workMatch[1]), {
+      await service.listWorkItems(decodeId(workMatch[1]) ?? '', {
         ...(states.length > 0 ? { states } : {}),
       }),
     )
@@ -186,7 +206,12 @@ async function route(
       body !== null && typeof body === 'object' && 'approved' in body
         ? Boolean((body as Record<string, unknown>)['approved'])
         : false
-    const resolved = service.resolveApproval(decodeURIComponent(approvalMatch[1]), approved)
+    const approvalId = decodeId(approvalMatch[1])
+    if (!approvalId) {
+      sendJson(response, 404, { error: 'invalid approval id' })
+      return
+    }
+    const resolved = service.resolveApproval(approvalId, approved)
     sendJson(response, resolved ? 200 : 404, { resolved })
     return
   }
@@ -233,16 +258,36 @@ function streamEvents(
   })
 }
 
+function tokensMatch(candidate: string | undefined, token: string): boolean {
+  if (candidate === undefined) return false
+  const a = Buffer.from(candidate)
+  const b = Buffer.from(token)
+  if (a.length !== b.length) return false
+  return timingSafeEqual(a, b)
+}
+
 function authorized(request: IncomingMessage, token: string): boolean {
   const header = request.headers.authorization
-  if (header === `Bearer ${token}`) return true
+  if (header?.startsWith('Bearer ') && tokensMatch(header.slice(7), token)) return true
   // EventSource cannot set headers; allow the token as a query parameter for
   // the SSE endpoint only. The token is still required.
   if (request.url) {
     const url = new URL(request.url, 'http://localhost')
-    if (url.pathname === '/api/events' && url.searchParams.get('token') === token) return true
+    if (
+      url.pathname === '/api/events' &&
+      tokensMatch(url.searchParams.get('token') ?? undefined, token)
+    ) {
+      return true
+    }
   }
   return false
+}
+
+const SAFE_ID = /^[A-Za-z0-9._:#-]+$/
+
+function decodeId(raw: string): string | undefined {
+  const decoded = decodeURIComponent(raw)
+  return SAFE_ID.test(decoded) ? decoded : undefined
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {

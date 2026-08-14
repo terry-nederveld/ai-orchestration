@@ -3,6 +3,7 @@ import { editFileTool, listDirectoryTool, readFileTool, writeFileTool } from './
 import { globTool, grepTool } from './search.js'
 import { createRunCommandTool, type RunCommandOptions } from './shell.js'
 
+export * from './env.js'
 export * from './filesystem.js'
 export * from './paths.js'
 export * from './search.js'

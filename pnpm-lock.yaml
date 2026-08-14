@@ -244,6 +244,9 @@ importers:
       '@overture/core':
         specifier: workspace:*
         version: link:../core
+      '@overture/tools':
+        specifier: workspace:*
+        version: link:../tools
       '@overture/workflow':
         specifier: workspace:*
         version: link:../workflow
