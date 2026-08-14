@@ -16,6 +16,8 @@ export interface WorkspaceRequest {
   /** Branch to create/check out for the run's work, when applicable. */
   readonly branch?: string
   readonly baseRef?: string
+  /** Existing directory to use (local-directory strategy only). */
+  readonly path?: string
 }
 
 export interface Workspace {
