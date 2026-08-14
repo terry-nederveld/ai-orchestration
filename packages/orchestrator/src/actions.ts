@@ -8,6 +8,34 @@ import type { WorkflowAction } from '@overture/core'
 import { asId, OrchestratorError } from '@overture/core'
 import type { RunActionContext, WorkflowActionFactory } from './ports.js'
 
+/**
+ * `workflow.assert` — turn a condition into a real step outcome. Because
+ * `when: false` skips are benign by design, workflows gate delivery on an
+ * always-eligible (`when: 'true'`) assert step whose interpolated condition
+ * (e.g. `${{ steps.review.succeeded || steps.re_review.succeeded }}`) must
+ * be 'true'; a false condition is a genuine failure that taints dependents.
+ */
+function assertAction(): WorkflowAction {
+  return {
+    id: 'workflow.assert',
+    async execute(args) {
+      const condition = args['condition']
+      if (condition === undefined) {
+        throw new OrchestratorError('workflow.assert requires a condition', 'invalid-input')
+      }
+      const satisfied = condition === 'true' || condition === true
+      if (!satisfied) {
+        const message =
+          typeof args['message'] === 'string'
+            ? args['message']
+            : `assertion failed: condition evaluated to ${String(condition)}`
+        throw new OrchestratorError(message, 'invalid-input')
+      }
+      return { asserted: true }
+    },
+  }
+}
+
 /** `source_control.commit` — stage everything and create a commit. */
 function commitAction(context: RunActionContext): WorkflowAction {
   return {
@@ -121,6 +149,7 @@ function defaultPullRequestBody(context: RunActionContext): string {
 }
 
 export const builtinActionFactory: WorkflowActionFactory = (context) => [
+  assertAction(),
   commitAction(context),
   pushAction(context),
   pullRequestAction(context),
