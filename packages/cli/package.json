@@ -1,0 +1,52 @@
+{
+  "name": "@overture/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Overture command-line interface",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "overture": "./dist/main.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run --root ../.. --project @overture/cli"
+  },
+  "dependencies": {
+    "@overture/agent-claude-code": "workspace:*",
+    "@overture/agent-codex": "workspace:*",
+    "@overture/agent-copilot": "workspace:*",
+    "@overture/config": "workspace:*",
+    "@overture/core": "workspace:*",
+    "@overture/model-anthropic": "workspace:*",
+    "@overture/model-openai": "workspace:*",
+    "@overture/orchestrator": "workspace:*",
+    "@overture/persistence": "workspace:*",
+    "@overture/policy": "workspace:*",
+    "@overture/runtime": "workspace:*",
+    "@overture/scm-git": "workspace:*",
+    "@overture/secrets": "workspace:*",
+    "@overture/server": "workspace:*",
+    "@overture/tools": "workspace:*",
+    "@overture/work-github": "workspace:*",
+    "@overture/work-jira-cloud": "workspace:*",
+    "@overture/work-jira-datacenter": "workspace:*",
+    "@overture/work-linear": "workspace:*",
+    "@overture/workflow": "workspace:*",
+    "@overture/workspaces": "workspace:*",
+    "yaml": "^2.8.0"
+  },
+  "devDependencies": {
+    "@overture/testkit": "workspace:*",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

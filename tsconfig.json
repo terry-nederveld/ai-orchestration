@@ -1,4 +1,30 @@
 {
   "files": [],
-  "references": [{ "path": "packages/core" }]
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/persistence" },
+    { "path": "packages/testkit" },
+    { "path": "packages/runtime" },
+    { "path": "packages/tools" },
+    { "path": "packages/workflow" },
+    { "path": "packages/scm-git" },
+    { "path": "packages/workspaces" },
+    { "path": "packages/policy" },
+    { "path": "packages/providers/model-anthropic" },
+    { "path": "packages/providers/model-openai" },
+    { "path": "packages/providers/work-jira-cloud" },
+    { "path": "packages/providers/work-jira-datacenter" },
+    { "path": "packages/providers/work-github" },
+    { "path": "packages/providers/work-linear" },
+    { "path": "packages/config" },
+    { "path": "packages/orchestrator" },
+    { "path": "packages/extensions" },
+    { "path": "packages/secrets" },
+    { "path": "packages/server" },
+    { "path": "packages/cli" },
+    { "path": "packages/providers/agent-claude-code" },
+    { "path": "packages/providers/agent-codex" },
+    { "path": "packages/providers/agent-copilot" },
+    { "path": "packages/providers/agent-discovery" }
+  ]
 }

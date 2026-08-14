@@ -1,0 +1,483 @@
+/**
+ * Daemon assembly: builds the full Overture service from configuration and
+ * runs it in the foreground with the loopback control plane. This is the
+ * composition root — the only place concrete providers meet the kernel.
+ */
+
+import { randomUUID } from 'node:crypto'
+import { mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
+import { loadConfig, type OvertureConfig } from '@overture/config'
+import {
+  type AgentProvider,
+  type Clock,
+  type IdGenerator,
+  InMemoryEventBus,
+  type Logger,
+  type ModelProvider,
+  type PermissionRule,
+  type SecretProvider,
+  systemClock,
+  type WorkflowDefinition,
+  type WorkflowProvider,
+  type WorkProvider,
+} from '@overture/core'
+import {
+  builtinActionFactory,
+  DefaultCommandRunner,
+  ProfileAgentRouter,
+  RunCoordinator,
+  Scheduler,
+  WorkflowActionRegistry,
+} from '@overture/orchestrator'
+import { RuleBasedPolicyEngine, workspaceCodingRules } from '@overture/policy'
+import { resolveSecretProvider, SecretRedactor } from '@overture/secrets'
+import {
+  ApprovalBroker,
+  clearDaemonInfo,
+  defaultStateDir,
+  OvertureService,
+  startControlPlane,
+  writeDaemonInfo,
+} from '@overture/server'
+
+const VERSION = '0.1.0'
+
+export interface AssembledDaemon {
+  readonly service: OvertureService
+  readonly config: OvertureConfig
+  readonly secrets: SecretProvider
+}
+
+class ConsoleLogger implements Logger {
+  constructor(
+    private readonly redactor: SecretRedactor,
+    private readonly fields: Record<string, unknown> = {},
+  ) {}
+
+  private write(level: string, message: string, fields?: Record<string, unknown>): void {
+    const merged = { ...this.fields, ...fields }
+    const suffix = Object.keys(merged).length > 0 ? ` ${JSON.stringify(merged)}` : ''
+    const line = `[${new Date().toISOString()}] ${level} ${message}${suffix}`
+    process.stderr.write(`${this.redactor.redact(line)}\n`)
+  }
+
+  debug(message: string, fields?: Record<string, unknown>): void {
+    if (process.env['OVERTURE_DEBUG']) this.write('DEBUG', message, fields)
+  }
+  info(message: string, fields?: Record<string, unknown>): void {
+    this.write('INFO', message, fields)
+  }
+  warn(message: string, fields?: Record<string, unknown>): void {
+    this.write('WARN', message, fields)
+  }
+  error(message: string, fields?: Record<string, unknown>): void {
+    this.write('ERROR', message, fields)
+  }
+  child(fields: Record<string, unknown>): Logger {
+    return new ConsoleLogger(this.redactor, { ...this.fields, ...fields })
+  }
+}
+
+class RandomIds implements IdGenerator {
+  next(prefix: string): string {
+    return `${prefix}-${randomUUID().slice(0, 13)}`
+  }
+}
+
+class CompositeWorkflowProvider implements WorkflowProvider {
+  readonly id = 'composite'
+  constructor(private readonly providers: readonly WorkflowProvider[]) {}
+
+  async list(): Promise<readonly WorkflowDefinition[]> {
+    const byName = new Map<string, WorkflowDefinition>()
+    // Later providers override earlier ones (builtin < user dir < project).
+    for (const provider of this.providers) {
+      for (const definition of await provider.list()) {
+        byName.set(definition.name, definition)
+      }
+    }
+    return [...byName.values()]
+  }
+
+  async get(name: string): Promise<WorkflowDefinition | undefined> {
+    const all = await this.list()
+    return all.find((definition) => definition.name === name)
+  }
+}
+
+/**
+ * Build the daemon from configuration. Provider construction is delegated to
+ * registries so new provider types plug in without touching this function's
+ * control flow.
+ */
+export async function assembleDaemon(options: {
+  readonly stateDir: string
+  readonly projectDir?: string
+  readonly clock?: Clock
+}): Promise<AssembledDaemon> {
+  const clock = options.clock ?? systemClock
+  const ids = new RandomIds()
+  const redactor = new SecretRedactor()
+  const logger = new ConsoleLogger(redactor)
+
+  const { config } = await loadConfig({
+    ...(options.projectDir ? { projectDir: options.projectDir } : {}),
+  })
+
+  await mkdir(options.stateDir, { recursive: true })
+  const secrets = await resolveSecretProvider({ fallbackDirectory: options.stateDir })
+  const resolveSecret = async (name: string | undefined): Promise<string | undefined> => {
+    if (!name) return undefined
+    const value = await secrets.get(name)
+    redactor.track(value)
+    return value
+  }
+
+  const { SqlitePersistenceProvider } = await import('@overture/persistence')
+  const persistence = new SqlitePersistenceProvider(join(options.stateDir, 'overture.db'))
+  await persistence.migrate()
+
+  const events = new InMemoryEventBus(logger)
+  const approvals = new ApprovalBroker(ids, clock)
+
+  // ----- policy ----------------------------------------------------------
+  const configuredRules: PermissionRule[] = config.permissions.rules.map((rule) => ({
+    id: rule.id,
+    capability: rule.capability as PermissionRule['capability'],
+    effect: rule.effect,
+    ...(rule.target !== undefined ? { target: rule.target } : {}),
+  }))
+  const policy = new RuleBasedPolicyEngine({
+    // Configured rules take precedence; workspace coding defaults follow.
+    rules: [...configuredRules, ...workspaceCodingRules()],
+    defaultEffect: config.permissions.defaultEffect,
+  })
+
+  // ----- model providers -------------------------------------------------
+  const { AnthropicModelProvider } = await import('@overture/model-anthropic')
+  const {
+    createOllamaProvider,
+    createOpenAICompatibleProvider,
+    createOpenAIProvider,
+    createOpenRouterProvider,
+  } = await import('@overture/model-openai')
+
+  const modelProviders: ModelProvider[] = []
+  for (const [id, providerConfig] of Object.entries(config.providers)) {
+    if (!providerConfig.enabled) continue
+    const apiKey = () => resolveSecret(providerConfig.apiKeySecret ?? `provider/${id}/api-key`)
+    if (id === 'anthropic') {
+      modelProviders.push(
+        new AnthropicModelProvider({
+          apiKey,
+          ...(providerConfig.baseUrl ? { baseUrl: providerConfig.baseUrl } : {}),
+        }),
+      )
+    } else if (id === 'openai') {
+      modelProviders.push(
+        createOpenAIProvider({
+          apiKey,
+          ...(providerConfig.baseUrl ? { baseUrl: providerConfig.baseUrl } : {}),
+        }),
+      )
+    } else if (id === 'openrouter') {
+      modelProviders.push(createOpenRouterProvider({ apiKey }))
+    } else if (id === 'ollama') {
+      modelProviders.push(
+        providerConfig.baseUrl
+          ? createOpenAICompatibleProvider({
+              id: 'ollama',
+              baseUrl: providerConfig.baseUrl,
+              requiresAuth: false,
+              apiKey: async () => undefined,
+            })
+          : createOllamaProvider({}),
+      )
+    } else if (providerConfig.baseUrl) {
+      modelProviders.push(
+        createOpenAICompatibleProvider({ id, baseUrl: providerConfig.baseUrl, apiKey }),
+      )
+    } else {
+      logger.warn('unknown model provider in config; skipping', { provider: id })
+    }
+  }
+
+  // ----- agent executors -------------------------------------------------
+  const { NativeAgentRuntime, DefaultToolRegistry } = await import('@overture/runtime')
+  const { createCodingToolProvider } = await import('@overture/tools')
+
+  const routingProfiles: Record<string, import('@overture/orchestrator').RouteProfile> = {}
+  for (const [name, profile] of Object.entries(config.routing.profiles)) {
+    routingProfiles[name] = {
+      executor: profile.executor,
+      ...(profile.model ? { model: profile.model } : {}),
+      ...(profile.systemPrompt ? { systemPrompt: profile.systemPrompt } : {}),
+    }
+  }
+
+  const agentProviders: AgentProvider[] = []
+  const router = new ProfileAgentRouter({
+    profiles: routingProfiles,
+    defaultProfile: config.routing.defaultProfile,
+  })
+
+  const toolRegistry = new DefaultToolRegistry()
+  toolRegistry.register(createCodingToolProvider())
+
+  for (const modelProvider of modelProviders) {
+    const runtime = new NativeAgentRuntime({
+      model: modelProvider,
+      defaultModel: config.providers[modelProvider.info.id]?.defaultModel ?? '',
+      tools: toolRegistry,
+      policy,
+      approvals,
+      sessions: persistence.sessions,
+      clock,
+      logger: logger.child({ runtime: `native-${modelProvider.info.id}` }),
+      resolveSecret,
+    })
+    router.register({
+      id: `native-${modelProvider.info.id}`,
+      start: (request) => runtime.start(request),
+      capabilities: () => modelProvider.capabilities(),
+    })
+  }
+
+  const { ClaudeCodeAgentProvider } = await import('@overture/agent-claude-code')
+  const { CodexAgentProvider } = await import('@overture/agent-codex')
+  const { CopilotAgentProvider } = await import('@overture/agent-copilot')
+
+  const claudeCode = new ClaudeCodeAgentProvider({ auth: { kind: 'cli-session' } })
+  const codex = new CodexAgentProvider({ auth: { kind: 'cli-session' } })
+  const copilot = new CopilotAgentProvider({ auth: { kind: 'cli-session' } })
+  for (const provider of [claudeCode, codex, copilot] as AgentProvider[]) {
+    agentProviders.push(provider)
+    router.register({
+      id: provider.info.id,
+      start: (request) => provider.start(request),
+      capabilities: () => provider.capabilities(),
+    })
+  }
+
+  // Fallback default profile when configuration provides none.
+  if (!routingProfiles[config.routing.defaultProfile]) {
+    const detected = await claudeCode.detect().catch(() => undefined)
+    if (detected?.available) {
+      routingProfiles[config.routing.defaultProfile] = { executor: claudeCode.info.id }
+    } else if (modelProviders[0]) {
+      const fallbackModel = config.providers[modelProviders[0].info.id]?.defaultModel
+      routingProfiles[config.routing.defaultProfile] = {
+        executor: `native-${modelProviders[0].info.id}`,
+        ...(fallbackModel !== undefined ? { model: fallbackModel } : {}),
+      }
+    } else {
+      logger.warn(
+        'no default routing profile and no usable executors; agent steps will fail until configured',
+      )
+    }
+  }
+
+  // ----- work providers --------------------------------------------------
+  const workProviders = new Map<string, WorkProvider>()
+  for (const source of config.work) {
+    const token = () => resolveSecret(source.tokenSecret ?? `work/${source.id}/token`)
+    if (source.type === 'github') {
+      const { GitHubIssuesWorkProvider } = await import('@overture/work-github')
+      workProviders.set(
+        source.id,
+        new GitHubIssuesWorkProvider({ token, repo: source.container ?? '' }),
+      )
+    } else if (source.type === 'jira-cloud') {
+      const { JiraCloudWorkProvider } = await import('@overture/work-jira-cloud')
+      workProviders.set(
+        source.id,
+        new JiraCloudWorkProvider({
+          site: source.baseUrl ?? '',
+          auth: async () => {
+            const value = await token()
+            const email = (source.options['email'] as string | undefined) ?? ''
+            return value ? { email, apiToken: value } : undefined
+          },
+          ...(source.container ? { projectKey: source.container } : {}),
+        }),
+      )
+    } else if (source.type === 'jira-datacenter') {
+      const { JiraDataCenterWorkProvider } = await import('@overture/work-jira-datacenter')
+      workProviders.set(
+        source.id,
+        new JiraDataCenterWorkProvider({
+          baseUrl: source.baseUrl ?? '',
+          auth: async () => {
+            const value = await token()
+            return value ? { pat: value } : undefined
+          },
+          ...(source.container ? { projectKey: source.container } : {}),
+        }),
+      )
+    } else if (source.type === 'linear') {
+      const { LinearWorkProvider } = await import('@overture/work-linear')
+      workProviders.set(
+        source.id,
+        new LinearWorkProvider({
+          apiKey: token,
+          ...(source.container ? { teamKey: source.container } : {}),
+        }),
+      )
+    } else {
+      logger.warn('unknown work source type in config; skipping', {
+        source: source.id,
+        type: source.type,
+      })
+    }
+  }
+
+  // ----- scm + workspaces ------------------------------------------------
+  const { GitHubSourceControlProvider, GitSourceControlProvider, GitWorktreeManager } =
+    await import('@overture/scm-git')
+  const {
+    GitCloneWorkspaceProvider,
+    GitWorktreeWorkspaceProvider,
+    LocalDirectoryWorkspaceProvider,
+    TempDirectoryWorkspaceProvider,
+    WorkspaceProviderRegistry,
+  } = await import('@overture/workspaces')
+
+  const scm = new GitHubSourceControlProvider()
+  const gitScm = new GitSourceControlProvider()
+  const worktrees = new GitWorktreeManager()
+  const reposRoot = config.workspaces.reposRoot ?? join(options.stateDir, 'repos')
+  const workspacesRoot = config.workspaces.root ?? join(options.stateDir, 'workspaces')
+  await mkdir(reposRoot, { recursive: true })
+  await mkdir(workspacesRoot, { recursive: true })
+
+  const workspaceRegistry = new WorkspaceProviderRegistry()
+  workspaceRegistry.register(
+    new GitWorktreeWorkspaceProvider({ reposRoot, workspacesRoot, scm: gitScm, worktrees }),
+  )
+  workspaceRegistry.register(new GitCloneWorkspaceProvider({ workspacesRoot, scm: gitScm }))
+  workspaceRegistry.register(new LocalDirectoryWorkspaceProvider())
+  workspaceRegistry.register(new TempDirectoryWorkspaceProvider())
+
+  // ----- workflows --------------------------------------------------------
+  const { DirectoryWorkflowProvider, createBuiltinWorkflowProvider } = await import(
+    '@overture/workflow'
+  )
+  const workflowProviders: WorkflowProvider[] = [createBuiltinWorkflowProvider()]
+  if (config.orchestrator.workflowsDir) {
+    workflowProviders.push(new DirectoryWorkflowProvider(config.orchestrator.workflowsDir))
+  }
+  if (options.projectDir) {
+    workflowProviders.push(new DirectoryWorkflowProvider(join(options.projectDir, '.overture')))
+  }
+  const workflows = new CompositeWorkflowProvider(workflowProviders)
+
+  // ----- kernel -----------------------------------------------------------
+  const actions = new WorkflowActionRegistry()
+  actions.register(builtinActionFactory)
+
+  // Items carry their adapter's provider id; resolve claims/transitions by it.
+  const byAdapterId = new Map<string, WorkProvider>()
+  for (const provider of workProviders.values()) {
+    if (byAdapterId.has(provider.info.id)) {
+      logger.warn(
+        'multiple work sources share one adapter id; claims resolve to the first instance',
+        { adapter: provider.info.id },
+      )
+      continue
+    }
+    byAdapterId.set(provider.info.id, provider)
+  }
+
+  const coordinator = new RunCoordinator({
+    work: { resolve: (providerId) => byAdapterId.get(providerId) },
+    workspaces: {
+      resolve: (strategy) =>
+        workspaceRegistry.has(strategy as never)
+          ? workspaceRegistry.resolve(strategy as never)
+          : undefined,
+    },
+    agents: router,
+    commands: new DefaultCommandRunner(),
+    actions,
+    approvals,
+    persistence,
+    events,
+    clock,
+    ids,
+    logger,
+    scm,
+    claimant: config.orchestrator.claimant,
+    branchPrefix: config.orchestrator.branchPrefix,
+  })
+
+  const scheduler = new Scheduler({
+    sources: [...workProviders.values()].map((provider) => ({ provider })),
+    workflows,
+    coordinator,
+    persistence,
+    events,
+    clock,
+    ids,
+    logger,
+    pollIntervalMs: config.orchestrator.pollIntervalMs,
+    maxConcurrentRuns: config.orchestrator.maxConcurrentRuns,
+  })
+
+  const service = new OvertureService({
+    version: VERSION,
+    persistence,
+    events,
+    scheduler,
+    coordinator,
+    workflows,
+    workProviders,
+    modelProviders,
+    agentProviders,
+    approvals,
+    clock,
+    ids,
+    logger,
+  })
+
+  return { service, config, secrets }
+}
+
+export async function runDaemon(args: readonly string[], stateDir: string): Promise<number> {
+  const projectDir = process.cwd()
+  const { service, config } = await assembleDaemon({ stateDir, projectDir })
+
+  const portFlagIndex = args.indexOf('--port')
+  const port =
+    portFlagIndex !== -1 && args[portFlagIndex + 1]
+      ? Number(args[portFlagIndex + 1])
+      : config.daemon.port
+
+  await service.start()
+  const handle = await startControlPlane(service, { host: config.daemon.host, port })
+  await writeDaemonInfo(stateDir, {
+    host: handle.host,
+    port: handle.port,
+    token: handle.token,
+    pid: process.pid,
+  })
+  process.stderr.write(`overture daemon listening on ${handle.host}:${handle.port}\n`)
+
+  await new Promise<void>((resolveShutdown) => {
+    const shutdown = () => {
+      process.stderr.write('shutting down…\n')
+      void (async () => {
+        await service.cancelAllActive().catch(() => {})
+        await handle.close().catch(() => {})
+        await service.stop().catch(() => {})
+        await clearDaemonInfo(stateDir).catch(() => {})
+        resolveShutdown()
+      })()
+    }
+    process.once('SIGINT', shutdown)
+    process.once('SIGTERM', shutdown)
+  })
+  return 0
+}
+
+export { defaultStateDir }
