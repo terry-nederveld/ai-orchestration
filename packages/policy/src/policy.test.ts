@@ -52,9 +52,9 @@ describe('RuleBasedPolicyEngine', () => {
     expect(engine.evaluate({ capability: 'filesystem.write', target: 'src/a.ts' }).effect).toBe(
       'allow',
     )
-    expect(engine.evaluate({ capability: 'filesystem.write', target: 'src/deep/a.ts' }).effect).toBe(
-      'deny',
-    )
+    expect(
+      engine.evaluate({ capability: 'filesystem.write', target: 'src/deep/a.ts' }).effect,
+    ).toBe('deny')
   })
 
   it('workspaceCodingRules allow the standard coding capabilities', () => {
@@ -69,10 +69,7 @@ describe('RuleBasedPolicyEngine', () => {
 describe('approval gateways', () => {
   it('DenyAllApprovalGateway records and denies', async () => {
     const gateway = new DenyAllApprovalGateway()
-    const approved = await gateway.requestApproval(
-      { capability: 'git.write' },
-      { effect: 'ask' },
-    )
+    const approved = await gateway.requestApproval({ capability: 'git.write' }, { effect: 'ask' })
     expect(approved).toBe(false)
     expect(gateway.denied).toHaveLength(1)
   })
