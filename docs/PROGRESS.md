@@ -25,16 +25,42 @@ providers → control plane/CLI → desktop UI → packaging → hardening → d
   work provider APIs, desktop frameworks).
 - 2026-08-14: Workspace scaffolded (pnpm monorepo, TypeScript strict, vitest,
   Biome).
+- 2026-08-14: `@overture/core` committed — full domain model, ports, state
+  machines, budget tracker, event bus (19 tests).
+- 2026-08-14: `@overture/runtime` + `@overture/tools` committed — native agent
+  loop (explicit completion protocol, budgets, compaction, sub-agents,
+  resume; 17 tests) and workspace-contained coding tools (15 tests).
+- 2026-08-14: `@overture/policy` committed — rule-based permission engine +
+  approval gateways (9 tests).
+- 2026-08-14: `@overture/config` committed — layered config (8 tests).
+- 2026-08-14: ADRs 0001–0006 committed.
 
 ## Architecture Decisions (see docs/adrs/)
 
-- (pending research) language, monorepo layout, desktop framework, process
-  model, provider abstraction, workflow representation, persistence, secrets,
-  workspace isolation, agent runtime.
+- 0001 TypeScript/Node core; 0002 pnpm monorepo; 0003 ports-and-adapters +
+  capabilities; 0004 state machines + explicit completion; 0005 budgets;
+  0006 event bus. Pending after research: desktop framework, process model,
+  persistence (node:sqlite), workflow format, workspace isolation, auth
+  strategies, MCP.
 
 ## Active Work
 
-- Awaiting research agent reports; scaffolding monorepo meanwhile.
+- Sub-agents in flight: persistence (done, 63 tests, pending report/commit),
+  testkit (done-ish, contract suites in place), workflow engine (fixing
+  tainted-skip status rule per lead review), scm-git + workspaces, model
+  providers (anthropic/openai), extensions/hooks/skills.
+- Lead: orchestrator kernel written (`@overture/orchestrator` — coordinator,
+  scheduler, eligibility, routing, actions, executors); 6/7 tests pass; the
+  7th awaits the workflow-engine taint fix.
+- Research agents (Symphony/Pi, SDKs/auth, work APIs, desktop) still out.
+
+## Integration decisions made while wiring
+
+- Workflow engine success rule must distinguish benign `when`-skips from
+  failure-caused (tainted) skips; remediation forgiveness is explicit via
+  `when: steps.review.succeeded || steps.remediate.succeeded` on delivery.
+- Per-package tests run as `vitest run --root ../.. --project <name>`.
+- ScriptedModelProvider snapshots request messages (runtime mutates arrays).
 
 ## Planned Package Layout
 
