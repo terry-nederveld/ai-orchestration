@@ -40,9 +40,6 @@ workspace:
   strategy: git-worktree
   retention: on-failure
 
-variables:
-  test_command: npm test
-
 budget: default
 
 steps:
@@ -69,7 +66,14 @@ steps:
     max_turns: 40
 
   - id: test
-    command: \${{ vars.test_command }}
+    # Deliberately a literal, not \${{ vars.test_command }}: command steps
+    # resolve \${{ }} via env-var indirection for injection safety (see
+    # engine.ts / expressions.ts interpolateForShell), which quotes every
+    # substituted value as a single token — a variable meant to expand into
+    # multiple words (e.g. "npm test" splitting into a command + an arg)
+    # would no longer word-split. Fork this workflow and edit the literal
+    # command directly to use a different test runner.
+    command: npm test
     depends_on: [implement]
     timeout: 10m
     retry:

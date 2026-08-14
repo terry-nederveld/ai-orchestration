@@ -48,7 +48,9 @@
  * genuine "nothing worked" outcome must actually be decided (and reported
  * as a real failure) by a step that runs unconditionally, not inferred from
  * an unreached `when`-gated step. See the built-in `software-development`
- * workflow's `approve_delivery` step for the pattern.
+ * workflow's `ensure_validated` step (a `workflow.assert` action,
+ * `when: 'true'`) for the pattern: when-gates choose whether to run;
+ * assert-gates decide success.
  *
  * Cancellation
  * ------------
@@ -61,12 +63,26 @@
  * Interpolation
  * -------------
  * Before an executor is invoked, `${{ ... }}` placeholders in the step's own
- * template-ish string fields (agent `goal`, command `command`/`cwd`/`env`
- * values, action `with` string values, approval `description`) are resolved
- * against the current variables and settled step results — so, e.g., a
- * command step can read `${{ vars.test_command }}` or an action step's
- * `with.title` can read `${{ steps.analyze.outputs.title }}`. `when` is
- * exempt: it's evaluated as an expression directly, never interpolated.
+ * template-ish string fields are resolved against the current variables and
+ * settled step results — e.g. an action step's `with.title` can read
+ * `${{ steps.analyze.outputs.title }}`. `when` is exempt: it's evaluated as
+ * an expression directly, never interpolated.
+ *
+ * Command steps get different treatment for the `command` field specifically
+ * (SECURITY: see expressions.ts `interpolateForShell`). `command` ultimately
+ * runs through a shell (`bash -c`), and its inputs — issue titles, branch
+ * names, agent-produced text — are attacker-influenced. Splicing a resolved
+ * value straight into the command string, even shell-quoted, is not safe: a
+ * value containing `"` or `` ` `` or `$(...)` can break out of quoting or
+ * inject a nested command. So `command` is interpolated via environment
+ * variable indirection instead of text substitution: each `${{ expr }}` in
+ * `command` becomes a quoted reference to a generated variable
+ * (`"$OVERTURE_VAR_0"`, ...), and the actual values are merged into the
+ * step's `env` for the executor to pass to the spawned process — never
+ * appearing in the command text at all, so there is nothing for shell
+ * metacharacters in the value to break out of. `cwd` and declared `env`
+ * values on a command step are NOT passed through a shell (they go straight
+ * into the spawn call), so they still use plain, direct interpolation.
  */
 
 import type {
@@ -82,6 +98,7 @@ import {
   type ExpressionContext,
   evaluateExpression,
   interpolate,
+  interpolateForShell,
   parseExpression,
 } from './expressions.js'
 
@@ -165,13 +182,22 @@ function interpolateStep(step: WorkflowStep, ctx: ExpressionContext): WorkflowSt
   switch (step.kind) {
     case 'agent':
       return { ...step, goal: interpolate(step.goal, ctx) }
-    case 'command':
+    case 'command': {
+      // SECURITY (see class doc comment): `command` runs through a shell, so its
+      // ${{ }} placeholders are resolved via env-var indirection, never spliced
+      // into the command text. `cwd`/declared `env` bypass the shell entirely
+      // (passed straight to spawn), so they use plain interpolation.
+      const { command, env: generatedEnv } = interpolateForShell(step.command, ctx)
+      const declaredEnv =
+        step.env !== undefined ? interpolateStringRecord(step.env, ctx) : undefined
+      const hasEnv = declaredEnv !== undefined || Object.keys(generatedEnv).length > 0
       return {
         ...step,
-        command: interpolate(step.command, ctx),
+        command,
         ...(step.cwd !== undefined ? { cwd: interpolate(step.cwd, ctx) } : {}),
-        ...(step.env !== undefined ? { env: interpolateStringRecord(step.env, ctx) } : {}),
+        ...(hasEnv ? { env: { ...declaredEnv, ...generatedEnv } } : {}),
       }
+    }
     case 'action':
       return {
         ...step,

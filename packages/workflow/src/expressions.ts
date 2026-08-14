@@ -352,3 +352,48 @@ export function interpolate(template: string, ctx: ExpressionContext): string {
     return stringifyValue(evaluateExpression(expr, ctx))
   })
 }
+
+export interface ShellInterpolationResult {
+  /** `template` with every `${{ expr }}` replaced by a quoted env-var reference. */
+  readonly command: string
+  /** Generated var name -> raw (unescaped) resolved value, for the process's env. */
+  readonly env: Readonly<Record<string, string>>
+}
+
+/**
+ * Resolves `${{ expr }}` placeholders for use in a shell command string —
+ * SAFELY, unlike {@link interpolate}. Substituted values are never spliced
+ * into the command text (which would let shell metacharacters in the value
+ * — `;`, `$()`, backticks, quotes — execute as commands); instead each
+ * placeholder becomes a quoted reference to a generated environment
+ * variable (`"$OVERTURE_VAR_0"`, `"$OVERTURE_VAR_1"`, ...), and the actual
+ * values travel out-of-band via `env`, to be merged into the spawned
+ * process's environment. Shell variable expansion of an env var never
+ * re-parses the *value* as shell syntax, so this is immune to injection
+ * regardless of what the value contains.
+ *
+ * Caveat: this only holds if the placeholder in the template is unquoted,
+ * e.g. `command: echo ${{ vars.title }}`. If an author wraps it in their
+ * own double quotes (`echo "${{ vars.title }}"`), the generated reference
+ * ends up double-quoted-within-double-quotes (`echo ""$OVERTURE_VAR_0""`),
+ * which is still injection-safe (the value's contents are never
+ * re-evaluated as shell syntax) but loses word-splitting/globbing
+ * protection on the value itself. Write command templates with bare
+ * placeholders and let this function supply the quoting.
+ */
+export function interpolateForShell(
+  template: string,
+  ctx: ExpressionContext,
+): ShellInterpolationResult {
+  const env: Record<string, string> = {}
+  let nextIndex = 0
+  const command = template.replace(INTERPOLATION_PATTERN, (_match, exprSource: string) => {
+    const expr = parseExpression(exprSource)
+    const value = stringifyValue(evaluateExpression(expr, ctx))
+    const varName = `OVERTURE_VAR_${nextIndex}`
+    nextIndex += 1
+    env[varName] = value
+    return `"$${varName}"`
+  })
+  return { command, env }
+}
