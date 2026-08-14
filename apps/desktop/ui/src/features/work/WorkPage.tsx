@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { useConnection } from '../../api/connection'
 import type { WorkItem } from '../../api/types'
 import { useApiQuery } from '../../api/useApiQuery'

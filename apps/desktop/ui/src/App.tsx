@@ -1,4 +1,4 @@
-import { NavLink, Route, Routes } from 'react-router-dom'
+import { NavLink, Route, Routes } from 'react-router'
 import styles from './App.module.css'
 import { ConnectGate } from './api/ConnectScreen'
 import { useConnection } from './api/connection'

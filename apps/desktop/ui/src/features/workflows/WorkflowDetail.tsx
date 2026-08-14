@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams } from 'react-router'
 import { useConnection } from '../../api/connection'
 import type { WorkflowDefinition, WorkflowStep, WorkflowValidationResult } from '../../api/types'
 import { useApiQuery } from '../../api/useApiQuery'

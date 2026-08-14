@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import type { Run, RunState } from '../../api/types'
 import { RunState as RunStateValues } from '../../api/types'
 import { useApiQuery } from '../../api/useApiQuery'

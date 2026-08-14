@@ -1,5 +1,5 @@
 import { type ReactNode, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import { useConnection } from '../../api/connection'
 import { useEventStream } from '../../api/events'
 import { TERMINAL_RUN_STATES } from '../../api/types'

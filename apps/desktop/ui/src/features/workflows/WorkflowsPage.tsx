@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import type { WorkflowDefinition } from '../../api/types'
 import { useApiQuery } from '../../api/useApiQuery'
 import { Badge } from '../../components/Badge'
