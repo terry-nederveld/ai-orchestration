@@ -1,3 +1,4 @@
+export * from './contracts/agent-provider.contract.js'
 export * from './contracts/model-provider.contract.js'
 export * from './contracts/notification-provider.contract.js'
 export * from './contracts/scm-provider.contract.js'

@@ -17,8 +17,23 @@ export interface FakeChild {
   emitError(error: Error): void
 }
 
+export interface FakeSpawnerOptions {
+  /**
+   * When true, `kill()` immediately emits `close` itself, as a real SIGKILL
+   * eventually does once the OS reaps the process. Off by default so
+   * existing tests keep driving `emitClose` explicitly after asserting on
+   * `killedWith`; the AgentProvider contract suite opts in so cancel()
+   * alone is enough to reach a terminal state.
+   */
+  readonly autoCloseOnKill?: boolean
+}
+
 /** Builds a Spawner whose single fake child process is driven manually by the returned control handle. */
-export function fakeSpawner(): { spawner: Spawner; calls: SpawnCall[]; child: FakeChild } {
+export function fakeSpawner(options: FakeSpawnerOptions = {}): {
+  spawner: Spawner
+  calls: SpawnCall[]
+  child: FakeChild
+} {
   const stdout = new EventEmitter()
   const stderr = new EventEmitter()
   const proc = new EventEmitter()
@@ -30,6 +45,8 @@ export function fakeSpawner(): { spawner: Spawner; calls: SpawnCall[]; child: Fa
     stderr: stderr as unknown as NodeJS.ReadableStream,
     kill: (signal?: NodeJS.Signals) => {
       killedWith.push(signal ?? 'SIGTERM')
+      if (options.autoCloseOnKill)
+        queueMicrotask(() => proc.emit('close', null, signal ?? 'SIGTERM'))
       return true
     },
   }) as unknown as SpawnedProcess

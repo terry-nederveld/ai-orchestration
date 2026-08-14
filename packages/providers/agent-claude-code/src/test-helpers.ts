@@ -213,3 +213,71 @@ export function hangingQuery(calls: FakeQueryCall[] = []): {
     close: () => closeFn(),
   }
 }
+
+/**
+ * A fake `query()` whose generator only yields messages explicitly pushed
+ * to it, and only ends when `end()` is called (or the provider calls
+ * `close()`, e.g. from `cancel()`). Unlike `fakeQuery`, nothing happens
+ * until driven — used by the AgentProvider contract suite so the
+ * cancel-before-completion test races a real cancel() against a fake that
+ * cannot resolve on its own.
+ */
+export function controllableQuery(calls: FakeQueryCall[] = []): {
+  readonly impl: typeof import('@anthropic-ai/claude-agent-sdk').query
+  push: (message: SDKMessage) => void
+  end: () => void
+} {
+  const buffer: SDKMessage[] = []
+  const waiters: Array<(result: IteratorResult<SDKMessage, void>) => void> = []
+  let closed = false
+
+  const push = (message: SDKMessage) => {
+    if (closed) return
+    const waiter = waiters.shift()
+    if (waiter) waiter({ value: message, done: false })
+    else buffer.push(message)
+  }
+  const end = () => {
+    closed = true
+    while (waiters.length > 0) waiters.shift()?.({ value: undefined, done: true })
+  }
+
+  const impl = ((params: { prompt: string | AsyncIterable<unknown>; options?: Options }) => {
+    calls.push({ prompt: params.prompt, options: params.options })
+
+    const generator = {
+      next(): Promise<IteratorResult<SDKMessage, void>> {
+        const value = buffer.shift()
+        if (value !== undefined) return Promise.resolve({ value, done: false })
+        if (closed) return Promise.resolve({ value: undefined, done: true })
+        return new Promise((resolve) => waiters.push(resolve))
+      },
+      async return(): Promise<IteratorResult<SDKMessage, void>> {
+        end()
+        return { value: undefined, done: true }
+      },
+      async throw(error: unknown): Promise<IteratorResult<SDKMessage, void>> {
+        end()
+        throw error
+      },
+      [Symbol.asyncIterator]() {
+        return generator
+      },
+    }
+
+    return Object.assign(generator, {
+      close: () => end(),
+      interrupt: async () => undefined,
+      setPermissionMode: async () => {},
+      setMcpPermissionModeOverride: async () => ({}),
+      setModel: async () => {},
+      setMcpServers: async () => ({ added: [], removed: [], errors: [] }),
+      streamInput: async () => {},
+      stopTask: async () => {},
+      backgroundTasks: async () => false,
+      toggleMcpServer: async () => {},
+    }) as unknown as Query
+  }) as unknown as typeof import('@anthropic-ai/claude-agent-sdk').query
+
+  return { impl, push, end }
+}
