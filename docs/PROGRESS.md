@@ -137,6 +137,10 @@ apps/
 - macOS keychain argv exposure (ps-visible transiently on write) —
   documented in docs/security.md.
 - Cheapest-suitable-model automatic routing (capability data exists).
+- Delivery-window crash reconciliation: a crash between push/PR and the
+  work-item transition wastes one redundant re-run (fails visibly on the
+  non-fast-forward push; no corruption). Planned: pre-delivery
+  existing-branch/PR check (ADR-0007 consequences).
 
 ## Important Constraints
 
