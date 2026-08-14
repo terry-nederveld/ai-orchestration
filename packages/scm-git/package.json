@@ -1,0 +1,27 @@
+{
+  "name": "@overture/scm-git",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Git and GitHub SourceControlProvider implementations backed by the git and gh CLIs",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run --root ../.. --project @overture/scm-git"
+  },
+  "dependencies": {
+    "@overture/core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

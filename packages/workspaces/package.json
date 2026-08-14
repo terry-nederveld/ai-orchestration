@@ -1,0 +1,28 @@
+{
+  "name": "@overture/workspaces",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Workspace isolation providers: git worktree, git clone, local directory, and temp directory strategies",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run --root ../.. --project @overture/workspaces"
+  },
+  "dependencies": {
+    "@overture/core": "workspace:*",
+    "@overture/scm-git": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
