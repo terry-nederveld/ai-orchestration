@@ -45,6 +45,9 @@ import {
 } from '@overture/workflow'
 import type { CommandRunner, ResolvedAgentExecutor } from '../ports.js'
 
+/** Hard ceiling on fan-out branches regardless of maxConcurrency (DoS bound). */
+export const FANOUT_HARD_CEILING = 1000
+
 /** Resolves executor ids ('native-anthropic', 'claude-code', …). */
 export interface ExecutorResolver {
   get(executorId: string): ResolvedAgentExecutor['start'] | undefined
@@ -505,6 +508,19 @@ export function createGraphNodeExecutors(deps: GraphExecutorDeps): GraphNodeExec
     }
     if (items.length === 0) {
       return { type: 'result', status: 'succeeded', outputs: { branches: [] } }
+    }
+    // Fan-out width bound: `items` may derive from agent-produced output
+    // over an untrusted work item, so a crafted list must not spawn an
+    // unbounded fleet of child runs. The node's declared maxConcurrency
+    // caps it; a hard ceiling caps that. An over-wide list fails the node
+    // (never silently truncates — that would drop work).
+    const limit = Math.min(node.config.maxConcurrency ?? FANOUT_HARD_CEILING, FANOUT_HARD_CEILING)
+    if (items.length > limit) {
+      return {
+        type: 'result',
+        status: 'failed',
+        error: `fan-out over ${items.length} items exceeds the limit of ${limit}`,
+      }
     }
     // The branch workflow runs at the version pinned into the snapshot.
     const branchDefinition = findInSnapshot(

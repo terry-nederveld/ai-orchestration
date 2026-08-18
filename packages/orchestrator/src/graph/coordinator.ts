@@ -95,6 +95,16 @@ export interface GraphCoordinatorOptions {
   readonly scm?: SourceControlProvider
   readonly checkpoints?: CheckpointSelector
   /**
+   * Sink for `secret`-type human input: the raw value is stored under the
+   * request's secretName and NEVER persisted or echoed — only the name
+   * flows on in the satisfaction. Also registers the value with the log
+   * redactor. Omitting it makes secret-type waits fail closed.
+   */
+  readonly secretSink?: {
+    store(name: string, value: string): Promise<void>
+    track?(value: string): void
+  }
+  /**
    * Built per run so the stepper's agents execute through the run's own
    * profile resolution and fallback chain (see createProfileExperimentAgents).
    */
@@ -258,7 +268,7 @@ export class GraphRunCoordinator {
     const condition = await this.options.persistence.waits.get(waitId)
     if (!condition) return { accepted: false, reason: 'unknown wait' }
 
-    const input =
+    let input =
       response.value !== undefined
         ? {
             requestId: waitId,
@@ -278,6 +288,22 @@ export class GraphRunCoordinator {
         }
         throw error
       }
+    }
+
+    // A secret response's raw value is stored out-of-band and replaced with
+    // its NAME before anything is persisted, echoed, or put in node
+    // outputs — the plaintext never reaches the wait/supplemental tables.
+    if (condition.request?.type === 'secret' && input && typeof input.value === 'string') {
+      const secretName = condition.request.secretName
+      if (!secretName || !this.options.secretSink) {
+        return {
+          accepted: false,
+          reason: 'secret input is not configured (no secretName or secret sink)',
+        }
+      }
+      this.options.secretSink.track?.(input.value)
+      await this.options.secretSink.store(secretName, input.value)
+      input = { ...input, value: secretName }
     }
 
     const satisfaction: WaitSatisfaction = {

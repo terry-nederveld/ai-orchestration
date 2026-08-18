@@ -63,7 +63,10 @@ interface Harness {
   persistence: PersistenceProvider
   work: FakeWorkProvider
   item: WorkItem
-  makeCoordinator: (script?: Record<string, string | (() => string)>) => GraphRunCoordinator
+  makeCoordinator: (
+    script?: Record<string, string | (() => string)>,
+    secretSink?: { store(name: string, value: string): Promise<void>; track?(value: string): void },
+  ) => GraphRunCoordinator
   specGoal: { value: string }
   checkpointCalls: string[]
 }
@@ -144,7 +147,10 @@ async function harness(
     restore: async () => ({}),
   }
 
-  const makeCoordinator = (script: Record<string, string | (() => string)> = {}) => {
+  const makeCoordinator = (
+    script: Record<string, string | (() => string)> = {},
+    secretSink?: { store(name: string, value: string): Promise<void>; track?(value: string): void },
+  ) => {
     const { start } = scriptedExecutor(script)
     return new GraphRunCoordinator({
       persistence,
@@ -155,6 +161,7 @@ async function harness(
       actions: new WorkflowActionRegistry(),
       specBuilder,
       checkpoints: { select: () => checkpointStrategy },
+      ...(secretSink ? { secretSink } : {}),
       events: new InMemoryEventBus(),
       clock: systemClock,
       ids: new SequentialIds(),
@@ -563,7 +570,7 @@ describe('GraphRunCoordinator crash-window recovery', () => {
     const run = await h.persistence.runs.get(runId)
     expect(run?.state).toBe(RunState.Completed)
     const state = await h.persistence.runGraphs.get(runId)
-    expect(state?.nodeResults['ask']?.outputs['value']).toBe('sqlite')
+    expect(state?.nodeResults.ask?.outputs.value).toBe('sqlite')
   })
 
   it('cancelling a waiting run releases its claim and orphaned claims are recovered', async () => {
@@ -582,5 +589,83 @@ describe('GraphRunCoordinator crash-window recovery', () => {
     await h.persistence.claims.tryClaim(h.item.id, asId<'run'>('run-VANISHED'))
     await coordinator.recover()
     expect(await h.persistence.claims.activeClaim(h.item.id)).toBeUndefined()
+  })
+})
+
+describe('GraphRunCoordinator secret human input (H2)', () => {
+  const secretGraph: WorkflowGraph = {
+    name: 'secret-flow',
+    entry: 'ask',
+    defaultProfile: { name: 'default-profile' },
+    nodes: [
+      {
+        id: 'ask',
+        config: {
+          kind: 'human-input',
+          request: {
+            type: 'secret',
+            prompt: 'Provide the deploy token',
+            surface: 'app',
+            secretName: 'deploy/token',
+          },
+        },
+      },
+      { id: 'use', config: { kind: 'agent', goal: 'Use the secret by name' } },
+      { id: 'done', config: { kind: 'terminal', outcome: 'completed' } },
+    ],
+    transitions: [
+      { id: 't1', from: 'ask', to: 'use', condition: "node.status == 'succeeded'" },
+      { id: 't2', from: 'use', to: 'done', condition: "node.status == 'succeeded'" },
+    ],
+  }
+
+  it('stores the raw value out-of-band and persists only the name', async () => {
+    const h = await harness(secretGraph)
+    const runId = asId<'run'>('run-secret')
+    const stored = new Map<string, string>()
+    const tracked: string[] = []
+    const secretSink = {
+      store: async (name: string, value: string) => void stored.set(name, value),
+      track: (value: string) => void tracked.push(value),
+    }
+    const coordinator = h.makeCoordinator({ use: '{"used": true}' }, secretSink)
+    await coordinator.start(h.item, 'secret-flow', runId)
+    const open = await h.persistence.waits.listOpen({ runId })
+    expect(open[0]?.request?.type).toBe('secret')
+
+    const RAW = 'sk-live-super-secret-value'
+    const result = await coordinator.satisfy(open[0]?.id ?? '', {
+      responder: 'terry',
+      channel: 'app',
+      value: RAW,
+    })
+    expect(result.accepted).toBe(true)
+
+    // The raw value went to the sink and the redactor, never the store.
+    expect(stored.get('deploy/token')).toBe(RAW)
+    expect(tracked).toContain(RAW)
+
+    // Nothing durable holds the raw value — only the secret NAME.
+    const all = await h.persistence.waits.listForRun(runId)
+    const serialized = JSON.stringify(all)
+    expect(serialized).not.toContain(RAW)
+    const state = await h.persistence.runGraphs.get(runId)
+    expect(JSON.stringify(state)).not.toContain(RAW)
+    expect(state?.nodeResults.ask?.outputs.value).toBe('deploy/token')
+  })
+
+  it('fails closed when no secret sink is configured', async () => {
+    const h = await harness(secretGraph)
+    const runId = asId<'run'>('run-secret-2')
+    const coordinator = h.makeCoordinator({}) // no secretSink
+    await coordinator.start(h.item, 'secret-flow', runId)
+    const open = await h.persistence.waits.listOpen({ runId })
+    const result = await coordinator.satisfy(open[0]?.id ?? '', {
+      responder: 'terry',
+      channel: 'app',
+      value: 'whatever',
+    })
+    expect(result.accepted).toBe(false)
+    expect(result.reason).toContain('secret input is not configured')
   })
 })
