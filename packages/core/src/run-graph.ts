@@ -2,7 +2,9 @@
  * Persisted graph-execution state (ADR-0017): everything the durable
  * engine needs to resume a run from its exact position — node results with
  * structured outputs, loop counters, fan-out branch progress, domain
- * state, and open waits. Persisted after every node settlement.
+ * state, and open waits. Persisted at every tick boundary (a tick runs to
+ * its next wait or terminal), so recovery is at-least-once from the last
+ * boundary: a crash mid-tick replays the tick's settled nodes.
  */
 
 import type { RunId } from './ids.js'
@@ -52,6 +54,12 @@ export interface RunGraphState {
   readonly loopCounters: Readonly<Record<string, number>>
   /** Node id → times activated (join accounting for multi-input nodes). */
   readonly activations: Readonly<Record<string, number>>
+  /**
+   * Node id → local retry re-executions. Kept separate from activations
+   * so retries never skew join/loop accounting (optional for states
+   * persisted before the field existed).
+   */
+  readonly retries?: Readonly<Record<string, number>>
   readonly domain: DomainState
   readonly fanOuts: Readonly<Record<string, FanOutState>>
   readonly variables: Readonly<Record<string, unknown>>
@@ -74,6 +82,7 @@ export function initialRunGraphState(
     resultHistory: [],
     loopCounters: {},
     activations: {},
+    retries: {},
     domain: { data: {} },
     fanOuts: {},
     variables,

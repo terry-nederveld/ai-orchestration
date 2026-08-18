@@ -613,3 +613,99 @@ describe('GraphEngine implicit-join loop re-entry', () => {
     expect(calls.poll).toBe(3)
   })
 })
+
+describe('GraphEngine satisfaction consumption and retry accounting', () => {
+  it('a node answering a satisfaction can yield a fresh second wait (no executor loop)', async () => {
+    const g = graph(
+      [{ id: 'gates', config: { kind: 'action', action: 'noop' } }, terminal('done')],
+      [t('g-d', 'gates', 'done', { condition: "node.status == 'succeeded'" })],
+      'gates',
+    )
+    // Scripted by call count: first call opens wait A; second call (carrying
+    // the satisfaction for A) opens wait B; third call settles.
+    let invocations = 0
+    const executors: GraphNodeExecutors = {
+      action: async () => {
+        invocations += 1
+        if (invocations <= 2) {
+          return {
+            type: 'wait',
+            spec: { kind: 'approval', parameters: { gate: `g${invocations}` } },
+          }
+        }
+        return { type: 'result', status: 'succeeded', outputs: {} }
+      },
+      terminal: async () => ({ type: 'result', status: 'succeeded', outputs: {} }),
+    }
+
+    const first = await engine.tick({
+      graph: g,
+      state: initialRunGraphState(runId, 's'),
+      executors,
+    })
+    expect(first.status).toBe('waiting')
+    expect(first.newWaits).toHaveLength(1)
+    expect(first.newWaits[0]?.spec.parameters['gate']).toBe('g1')
+    expect(invocations).toBe(1)
+
+    // Satisfy the first wait: the node re-executes ONCE, consumes the
+    // satisfaction, and its second wait must be recorded — not dropped
+    // while the executor spins.
+    const second = await engine.tick({
+      graph: g,
+      state: roundTrip(first.state),
+      executors,
+      satisfactions: { gates: { kind: 'approval', at: new Date() } },
+    })
+    expect(second.status).toBe('waiting')
+    expect(second.newWaits).toHaveLength(1)
+    expect(second.newWaits[0]?.spec.parameters['gate']).toBe('g2')
+    expect(invocations).toBe(2)
+
+    const third = await engine.tick({
+      graph: g,
+      state: roundTrip(second.state),
+      executors,
+      satisfactions: { gates: { kind: 'approval', at: new Date() } },
+    })
+    expect(third.status).toBe('completed')
+    expect(invocations).toBe(3)
+  })
+
+  it('a retried node inside a bounded loop still re-enters the loop', async () => {
+    const g = graph(
+      [
+        agent('a'),
+        { ...agent('work'), retry: { maxAttempts: 2 } },
+        agent('check'),
+        terminal('done'),
+      ],
+      [
+        t('a-w', 'a', 'work'),
+        t('w-c', 'work', 'check', { condition: "node.status == 'succeeded'", loopBound: 3 }),
+        t('c-again', 'check', 'work', { condition: 'outputs.ok == false', loopBound: 2 }),
+        t('c-done', 'check', 'done', { condition: 'outputs.ok == true' }),
+      ],
+      'a',
+    )
+    const { executors, calls } = scripted({
+      // First execution fails (triggers a local retry), then succeeds on
+      // every later attempt.
+      work: [
+        { type: 'result', status: 'failed', error: 'transient' },
+        { type: 'result', status: 'succeeded', outputs: {} },
+        { type: 'result', status: 'succeeded', outputs: {} },
+      ],
+      check: [
+        { type: 'result', status: 'succeeded', outputs: { ok: false } },
+        { type: 'result', status: 'succeeded', outputs: { ok: true } },
+      ],
+    })
+    const outcome = await run(g, executors)
+    // The retry must not skew join accounting: after check says ok=false,
+    // work re-activates through the loop edge and the run completes.
+    expect(outcome.status).toBe('completed')
+    expect(calls.work).toBe(3) // failed attempt + retry + loop re-entry
+    expect(calls.check).toBe(2)
+  })
+})

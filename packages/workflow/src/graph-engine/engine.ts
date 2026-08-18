@@ -114,6 +114,7 @@ interface MutableState {
   resultHistory: GraphNodeResult[]
   loopCounters: Record<string, number>
   activations: Record<string, number>
+  retries: Record<string, number>
   domain: { name?: string; data: Record<string, unknown> }
   variables: Record<string, unknown>
 }
@@ -202,8 +203,18 @@ export class GraphEngine {
       }
 
       // Retry failed nodes locally before transitions see the failure.
+      // Retries are tracked separately from activations: an activation
+      // without an inbound firing would permanently skew implicit-join
+      // accounting and stall later loop re-entries into this node.
       if (result.status === 'failed' && node.retry && result.attempt < node.retry.maxAttempts) {
-        activate(node.id)
+        mutable.retries[node.id] = (mutable.retries[node.id] ?? 0) + 1
+        mutable.activeNodeIds.add(node.id)
+        mutable.waitingNodeIds.delete(node.id)
+        emit({
+          type: 'node.activated',
+          nodeId: node.id,
+          attempt: (mutable.activations[node.id] ?? 1) + (mutable.retries[node.id] ?? 0),
+        })
         return 'continue'
       }
 
@@ -242,6 +253,14 @@ export class GraphEngine {
       return 'continue'
     }
 
+    // Satisfactions are delivered exactly once: consumed on delivery so a
+    // node that answers a satisfaction and legitimately needs ANOTHER wait
+    // (a second human gate, an experiment iterating after judgment) yields
+    // a fresh wait instead of being re-invoked in a loop.
+    const pendingSatisfactions: Record<string, WaitSatisfaction> = {
+      ...(input.satisfactions ?? {}),
+    }
+
     // Main loop: execute runnable nodes until quiescent or stopped.
     while (!signal.aborted && terminal === undefined && fatalError === undefined) {
       if (settlements >= maxSettlements) {
@@ -251,7 +270,7 @@ export class GraphEngine {
       const runnable = [...mutable.activeNodeIds]
         .filter(
           (nodeId) =>
-            !mutable.waitingNodeIds.has(nodeId) || input.satisfactions?.[nodeId] !== undefined,
+            !mutable.waitingNodeIds.has(nodeId) || pendingSatisfactions[nodeId] !== undefined,
         )
         .sort()
       if (runnable.length === 0) break
@@ -271,9 +290,14 @@ export class GraphEngine {
             }
           }
           const startedAt = clock.now()
-          const attempt = mutable.activations[nodeId] ?? 1
-          const satisfaction = input.satisfactions?.[nodeId]
-          const consumedSatisfaction = mutable.waitingNodeIds.has(nodeId)
+          const attempt = (mutable.activations[nodeId] ?? 1) + (mutable.retries[nodeId] ?? 0)
+          const satisfaction = pendingSatisfactions[nodeId]
+          const consumedSatisfaction =
+            mutable.waitingNodeIds.has(nodeId) && satisfaction !== undefined
+          if (consumedSatisfaction) {
+            delete pendingSatisfactions[nodeId]
+            mutable.waitingNodeIds.delete(nodeId)
+          }
 
           // Guards run before the executor; a failing guard fails the node.
           for (const guard of node.guards ?? []) {
@@ -344,6 +368,10 @@ export class GraphEngine {
         if (execution.yield.type === 'wait') {
           if (!mutable.waitingNodeIds.has(execution.nodeId)) {
             mutable.waitingNodeIds.add(execution.nodeId)
+            // A re-yield within this tick supersedes the earlier pending
+            // wait for the same node.
+            const priorIndex = newWaits.findIndex((wait) => wait.nodeId === execution.nodeId)
+            if (priorIndex !== -1) newWaits.splice(priorIndex, 1)
             newWaits.push({
               nodeId: execution.nodeId,
               spec: execution.yield.spec,
@@ -359,7 +387,8 @@ export class GraphEngine {
         }
         const result: GraphNodeResult = {
           nodeId: execution.nodeId,
-          attempt: mutable.activations[execution.nodeId] ?? 1,
+          attempt:
+            (mutable.activations[execution.nodeId] ?? 1) + (mutable.retries[execution.nodeId] ?? 0),
           status: execution.yield.status,
           outputs: execution.yield.outputs ?? {},
           ...(execution.yield.error !== undefined ? { error: execution.yield.error } : {}),
@@ -498,6 +527,7 @@ function thaw(state: RunGraphState): MutableState {
     resultHistory: [...state.resultHistory],
     loopCounters: { ...state.loopCounters },
     activations: { ...state.activations },
+    retries: { ...(state.retries ?? {}) },
     domain: {
       ...(state.domain.name !== undefined ? { name: state.domain.name } : {}),
       data: { ...state.domain.data },
@@ -515,6 +545,7 @@ function freeze(previous: RunGraphState, mutable: MutableState, at: Date): RunGr
     resultHistory: mutable.resultHistory,
     loopCounters: mutable.loopCounters,
     activations: mutable.activations,
+    retries: mutable.retries,
     domain: {
       ...(mutable.domain.name !== undefined ? { name: mutable.domain.name } : {}),
       data: mutable.domain.data,
