@@ -12,6 +12,8 @@
     { "path": "packages/policy" },
     { "path": "packages/checkpoints" },
     { "path": "packages/resolution" },
+    { "path": "packages/experiments" },
+    { "path": "packages/templates" },
     { "path": "packages/providers/model-anthropic" },
     { "path": "packages/providers/model-openai" },
     { "path": "packages/providers/work-jira-cloud" },

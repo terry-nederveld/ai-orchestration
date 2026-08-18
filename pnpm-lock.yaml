@@ -236,6 +236,22 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@24.13.3)(jsdom@25.0.1)(yaml@2.9.0)
 
+  packages/experiments:
+    dependencies:
+      '@overture/core':
+        specifier: workspace:*
+        version: link:../core
+      '@overture/workflow':
+        specifier: workspace:*
+        version: link:../workflow
+    devDependencies:
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@24.13.3)(jsdom@25.0.1)(yaml@2.9.0)
+
   packages/extensions:
     dependencies:
       '@modelcontextprotocol/sdk':
@@ -559,6 +575,22 @@ importers:
       '@overture/testkit':
         specifier: workspace:*
         version: link:../testkit
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@24.13.3)(jsdom@25.0.1)(yaml@2.9.0)
+
+  packages/templates:
+    dependencies:
+      '@overture/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@overture/persistence':
+        specifier: workspace:*
+        version: link:../persistence
       typescript:
         specifier: ^5.9.2
         version: 5.9.3
