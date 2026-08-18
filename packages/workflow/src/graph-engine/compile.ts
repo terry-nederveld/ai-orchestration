@@ -42,6 +42,14 @@
  * which the orchestrator applies outside the graph (ADR-0017 layer 4).
  * Likewise `workspace` and `budget` are run-provisioning concerns with no
  * graph representation.
+ *
+ * Known divergence (inherent to the taint-as-stall encoding): a `when`
+ * step downstream of a TAINTED skip that v1 would have "recovered" (the
+ * tainted step feeds a when-step whose condition still passes, and every
+ * v1 terminal ends fine) fails in the compiled graph — the tainted step
+ * fires no edges, so the when-node never evaluates and the run stalls to
+ * failure. No built-in workflow exercises this; a user workflow that
+ * needs it should model the recovery as an explicit failure edge instead.
  */
 
 import type {
