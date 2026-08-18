@@ -12,6 +12,32 @@ of the raw YAML shape), `parser.ts` (raw shape → the stable
 `when`/interpolation language), `engine.ts` (execution), and
 `builtin-workflows.ts`.
 
+## Two workflow models
+
+Overture now has two workflow models:
+
+- **The v1 step DAG** — this page. File-based YAML, a directed acyclic
+  graph of steps, in-memory execution. Simple, and still the model the
+  scheduler's poll-and-claim loop dispatches.
+- **The durable graph model** — [durable-workflows.md](durable-workflows.md)
+  ([adr-0017](adrs/adr-0017.md)). Versioned graph definitions with typed
+  nodes (gates, human input, waits, sub-workflows, fan-out, experiments),
+  bounded loops, and tick-based execution whose state is persisted after
+  every node settlement — runs suspend for days, survive restarts, and
+  resume from their exact position.
+
+The two are not rivals: a v1 definition compiles into the graph model via
+`compileWorkflow` (`packages/workflow/src/graph-engine/compile.ts`),
+preserving v1's execution semantics — `depends_on` becomes
+success-conditioned transitions into joins, `when` steps become decision
+nodes, and the benign-skip/tainted-skip rules (below) are reproduced
+structurally. One narrow, documented divergence exists (a `when` step
+downstream of a tainted skip that v1 would have "recovered"); the
+compiler's header comment records it, and no built-in workflow exercises
+it. Everything on this page remains accurate for v1 workflows;
+reach for the graph model when you need durability, loops, human input as
+state, or any of the Phase 2 machinery.
+
 ## Where workflow files live
 
 Three sources, composed together (`packages/cli/src/daemon.ts`):

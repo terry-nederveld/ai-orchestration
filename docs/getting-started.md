@@ -148,6 +148,23 @@ overture providers
 installed, authenticated, and available — useful for catching a missing key
 or an unauthenticated CLI before you wait on a poll cycle.
 
+On first boot the daemon also installs and enables the **template
+catalog** — the `autonomous-delivery` and `autonomous-discovery` durable
+graph workflows, with their gate sets, rubric, experiment, and default
+profiles (see [durable-workflows.md](durable-workflows.md)). Confirm
+with:
+
+```sh
+overture definitions list
+```
+
+and disable anything you don't want startable with
+`overture definitions disable workflow autonomous-discovery` — the
+daemon respects that on later boots. Durable graph runs suspend on
+human questions instead of failing; check and answer them with
+`overture waits list` / `overture waits respond <id> --value <v>`, and
+inspect a graph run's position with `overture graph-run show <run-id>`.
+
 ## Trigger a run
 
 The workflow shipped as Overture's default — `software-development` — plans,
@@ -265,8 +282,13 @@ If the run opens a pull request, its URL comes through as a
 
 - [configuration.md](configuration.md) — the full config schema, every
   section, and an honest account of which knobs the daemon currently reads.
-- [workflows.md](workflows.md) — the YAML format, expression language, and
-  execution semantics, with the built-in workflow annotated step by step.
+- [workflows.md](workflows.md) — the v1 YAML format, expression language,
+  and execution semantics, with the built-in workflow annotated step by
+  step.
+- [durable-workflows.md](durable-workflows.md) — the durable graph model:
+  versioned definitions, gates, durable waits and human input,
+  checkpoints, profiles, experiments, lanes and schedules, routing, the
+  shipped templates, and side-effect-free Evaluate.
 - [providers.md](providers.md) — every model, agent, and work provider:
   what each needs, and the exact config to wire it up.
 - [extending.md](extending.md) — adding a new provider, tool, workflow

@@ -40,6 +40,41 @@ Everything in this diagram observes and is observed only through the
 ([adr-0010](adrs/adr-0010.md)) — the runtime never imports UI, CLI, or
 notification code directly.
 
+### The durable graph runtime (Phase 2)
+
+Alongside the v1 poll-and-claim pipeline above, the daemon assembles a
+second execution path for **durable graph workflows**
+([adr-0017](adrs/adr-0017.md), reference: [durable-workflows.md](durable-workflows.md)):
+
+```
+  lanes / schedules / routing  ──────────▶  GraphScheduler
+  (backlog rank, cron, human selection)   (orchestrator/src/scheduling)
+                                                  │ claim + start
+                                                  ▼
+   definition store ──resolve + pin──▶  GraphRunCoordinator ◀──waits API──
+   (versioned, content-addressed,       (orchestrator/src/graph)          │
+    immutable run snapshots)                      │ tick                  │
+                                                  ▼                       │
+                                     Graph Engine (workflow/src/graph-engine)
+                                     resumable reducer over persisted state
+                                                  │
+                    agent / command / action / gate / human-input / wait /
+                    subworkflow / fan-out / experiment / terminal executors
+                                                  │
+                            suspend ──▶ durable WaitCondition + checkpoint
+                                        (git branch or work-item section)
+```
+
+Execution is **tick-based**: the engine is a pure, resumable reducer —
+one tick executes runnable nodes, settles results, fires declared
+transitions, and returns; the coordinator persists the graph state after
+every tick and converts engine waits into durable rows. A run can
+therefore suspend for days, survive restarts (`recover()` re-drives
+interrupted runs from persisted state), and resume from its exact graph
+position when a wait is satisfied. Runs execute against an immutable
+snapshot of every definition they reference, pinned at start
+([adr-0018](adrs/adr-0018.md)).
+
 ## Package map
 
 **Core**
@@ -67,11 +102,42 @@ notification code directly.
   `grep`, `run_command`).
 - `packages/workflow` — the YAML schema, the safe expression language, and
   the dependency-graph execution engine ([adr-0008](adrs/adr-0008.md));
-  see [workflows.md](workflows.md).
+  see [workflows.md](workflows.md). Also hosts the **graph engine**
+  (`src/graph-engine/`): the durable tick reducer, the scope-expression
+  language shared by transitions/guards/gates/routing, and the v1 → graph
+  compiler ([adr-0017](adrs/adr-0017.md)).
 - `packages/orchestrator` — the `Scheduler` (poll, trigger/eligibility,
   claim), `RunCoordinator` (workspace prep → engine execution → delivery →
   cleanup, for one claimed item), agent routing, the command runner, and
-  the workflow-action registry.
+  the workflow-action registry. Also hosts the graph runtime's
+  orchestration (`src/graph/`): the `GraphRunCoordinator` (snapshot
+  pinning, ticks, durable waits, checkpoints, spec revisions, child runs),
+  node executors, the `SnapshotResolver`, the `DefaultSpecBuilder`, the
+  side-effect-free `evaluateWorkflow` ([adr-0026](adrs/adr-0026.md)), and
+  the experiment stepper — plus lane/schedule/routing dispatch
+  (`src/scheduling/`: `GraphScheduler`, routing rules and rule learning;
+  [adr-0023](adrs/adr-0023.md), [adr-0024](adrs/adr-0024.md)).
+
+**Durable graph runtime** (Phase 2; see
+[durable-workflows.md](durable-workflows.md))
+
+- `packages/checkpoints` — the two shipped checkpoint strategies
+  ([adr-0020](adrs/adr-0020.md)): `git-branch` (WIP commit + push, restore
+  as a fresh worktree from the remote branch) for coding runs, and
+  `work-item-section` (a delimiter-managed section of the work item's
+  description, human content never overwritten) for non-code runs.
+- `packages/resolution` — convention-file instruction discovery
+  (CLAUDE.md, AGENTS.md, AGENT.md, copilot-instructions, with scope and
+  precedence) and composable context resolvers assembled under an
+  explicit budget.
+- `packages/experiments` — the resumable experiment state machine
+  (generate → prototype → evaluate → select → human judgment, bounded
+  iteration; [adr-0022](adrs/adr-0022.md)) and durable learning capture
+  rendered as markdown.
+- `packages/templates` — the versioned template catalog: the flagship
+  Autonomous Delivery and Autonomous Discovery graph workflows with
+  their gate sets, rubric, experiment, and default profiles; installed
+  idempotently into the definition store by the daemon on boot.
 
 **Isolation and delivery**
 
@@ -126,7 +192,10 @@ OpenAI-compatible endpoints, OpenRouter, and Ollama), `agent-claude-code`,
 | Orchestration | [0007](adrs/adr-0007.md) lifecycle & persisted claims · [0008](adrs/adr-0008.md) workflow engine · [0009](adrs/adr-0009.md) workspace isolation |
 | Persistence | [0010](adrs/adr-0010.md) SQLite via `node:sqlite` |
 | Process model | [0011](adrs/adr-0011.md) daemon + thin CLI/GUI clients · [0012](adrs/adr-0012.md) Tauri desktop shell |
-| Providers, extensibility, security | [0013](adrs/adr-0013.md) provider authentication · [0014](adrs/adr-0014.md) MCP integration · [0015](adrs/adr-0015.md) secret storage |
+| Providers, extensibility, security | [0013](adrs/adr-0013.md) provider authentication · [0014](adrs/adr-0014.md) MCP integration · [0015](adrs/adr-0015.md) secret storage · [0016](adrs/adr-0016.md) v1 security hardening |
+| Durable graph runtime | [0017](adrs/adr-0017.md) graph model & four state layers · [0018](adrs/adr-0018.md) versioned definitions & run snapshots · [0019](adrs/adr-0019.md) durable waits & human input · [0020](adrs/adr-0020.md) execution specs & checkpoints |
+| Profiles, experiments, scheduling | [0021](adrs/adr-0021.md) composable profiles & fallback chains · [0022](adrs/adr-0022.md) experiments & pinned rubrics · [0023](adrs/adr-0023.md) lanes & durable recurrence · [0024](adrs/adr-0024.md) routing & rule learning |
+| Clients and tooling | [0025](adrs/adr-0025.md) federated desktop client · [0026](adrs/adr-0026.md) designer & side-effect-free Evaluate |
 
 ## Observability: everything is an event
 

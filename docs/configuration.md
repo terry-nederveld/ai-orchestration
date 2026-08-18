@@ -278,6 +278,73 @@ free-text role label passed to the model as context and as a routing key
 Set per-step routing, tools, and turn limits directly in the workflow YAML
 instead (see [workflows.md](workflows.md)).
 
+### `mapping`
+
+```yaml
+mapping:
+  rules:
+    - id: <string>               # required
+      priority: <int>            # default 0; higher wins on conflict
+      when: <predicate>          # required; see below
+      repositories:              # required, at least one
+        - locator: <string>      # e.g. acme/widgets
+          role: primary          # primary | frontend | backend | infra | docs | dependency
+          defaultBranch: <string>
+          scmProviderId: <string>
+      onConflict: replace        # replace | merge (default: merge)
+```
+
+Declarative work-item → repository mapping for the durable graph runtime
+(`packages/core/src/mapping.ts`; schema in
+`packages/config/src/schema.ts`). When a graph run starts, the
+`DefaultSpecBuilder` (`packages/orchestrator/src/graph/spec-builder.ts`)
+resolves which repositories the run works against and records each with
+its role and provenance in the run's execution specification. Explicit
+repository metadata on the work item itself always wins (recorded as
+`resolvedBy: explicit`); these rules are the second resolution path
+(`resolvedBy: rule:<id>`).
+
+`when` is a recursive predicate: `{ condition: {...} }` at the leaves,
+combined with `{ all: [...] }`, `{ any: [...] }`, and `{ not: ... }`. A
+condition has a `field` (dotted path over the work item: `provider`,
+`externalId`, `title`, `state`, `type`, `priority`, `labels`,
+`metadata.<key>`, `parent.<field>`, `relationships.<kind>`), an
+`operator` (`equals`, `in`, `contains`, `regex`), and a `value` (string,
+or string array for `in`).
+
+Resolution is deterministic: rules sort by `priority` descending (ties by
+declaration order); every matching rule contributes its repositories
+(deduplicated by locator + role); a matching rule with
+`onConflict: replace` contributes and then discards everything below it.
+
+```yaml
+mapping:
+  rules:
+    - id: billing-items
+      priority: 10
+      when:
+        all:
+          - condition: { field: labels, operator: equals, value: billing }
+          - not:
+              condition: { field: type, operator: equals, value: epic }
+      repositories:
+        - { locator: acme/billing-api, role: primary }
+        - { locator: acme/billing-web, role: frontend }
+      onConflict: replace
+    - id: default-repo
+      priority: 0
+      when:
+        condition: { field: provider, operator: equals, value: github }
+      repositories:
+        - { locator: acme/widgets, role: primary }
+```
+
+An item with neither explicit metadata nor a matching rule resolves to
+no repositories — its execution specification simply records none, and
+a dry-run via Evaluate reports a `no-repository` blocker when the
+workflow requires a workspace
+(see [durable-workflows.md](durable-workflows.md)).
+
 ### `orchestrator`
 
 ```yaml
@@ -311,6 +378,19 @@ daemon:
 
 The loopback HTTP control-plane bind address and port. `overture daemon
 --port <n>` overrides `daemon.port` at the CLI without editing config.
+
+**Template install on boot.** On every start, the daemon installs the
+template catalog (`packages/templates/src` — Autonomous Delivery and
+Autonomous Discovery with their gate sets, rubric, experiment, and
+default profiles) into the definition store
+(`packages/cli/src/daemon.ts`). Installation is idempotent: documents
+are content-addressed, so an unchanged template mints no new version. A
+freshly installed definition (lifecycle `draft`) is enabled
+automatically; a definition an operator has since `disable`d stays
+disabled — the daemon never overrides that. There is no config knob for
+this; manage the installed definitions with
+`overture definitions list|enable|disable`
+(see [durable-workflows.md](durable-workflows.md)).
 
 ## Complete example
 
@@ -366,6 +446,15 @@ work:
     tokenSecret: work/jira/token
     options:
       email: bot@acme.com
+
+mapping:
+  rules:
+    - id: default-repo
+      priority: 0
+      when:
+        condition: { field: provider, operator: equals, value: github }
+      repositories:
+        - { locator: acme/widgets, role: primary }
 
 mcp:
   servers:
