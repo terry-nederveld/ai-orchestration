@@ -61,6 +61,8 @@ export interface AssembledDaemon {
    */
   readonly graphTick: () => Promise<void>
   readonly graphRecover: () => Promise<void>
+  /** Register a secret with the log/event/payload redactor. */
+  readonly trackSecret: (value: string | undefined) => void
 }
 
 class ConsoleLogger implements Logger {
@@ -593,6 +595,10 @@ export async function assembleDaemon(options: {
     actions,
     specBuilder,
     scm,
+    secretSink: {
+      store: (name, value) => secrets.set(name, value),
+      track: (value) => redactor.track(value),
+    },
     checkpoints: {
       // Coding runs (a workspace exists) checkpoint to the run branch;
       // everything else checkpoints into the work item's managed section.
@@ -641,7 +647,7 @@ export async function assembleDaemon(options: {
       },
     ): Promise<{ readonly accepted: boolean; readonly reason?: string }> => {
       const condition = await persistence.waits.get(waitId)
-      if (condition?.parameters['reason'] === WORKFLOW_SELECTION_REQUIRED) {
+      if (condition?.parameters.reason === WORKFLOW_SELECTION_REQUIRED) {
         const outcome = await graphScheduler.onSelection(waitId, {
           workflow: String(response.value ?? ''),
           responder: response.responder,
@@ -651,7 +657,7 @@ export async function assembleDaemon(options: {
           ...(outcome.reason !== undefined ? { reason: outcome.reason } : {}),
         }
       }
-      if (condition?.parameters['reason'] === ROUTING_RULE_PROPOSAL) {
+      if (condition?.parameters.reason === ROUTING_RULE_PROPOSAL) {
         const outcome = await graphScheduler.onRuleApproval(waitId, {
           approved: response.value === true,
           responder: response.responder,
@@ -723,6 +729,10 @@ export async function assembleDaemon(options: {
     service,
     config,
     secrets,
+    // Tracked so the control-plane bearer token is scrubbed everywhere the
+    // redactor reaches (logs, events, payloads) — defense in depth beside
+    // the method+path log discipline.
+    trackSecret: (value: string | undefined) => redactor.track(value),
     graphRecover: async () => graphCoordinator.recover(),
     graphTick: async () => {
       await graphCoordinator.fireDueTimers(clock.now())
@@ -734,7 +744,7 @@ export async function assembleDaemon(options: {
 
 export async function runDaemon(args: readonly string[], stateDir: string): Promise<number> {
   const projectDir = process.cwd()
-  const { service, config, graphRecover, graphTick } = await assembleDaemon({
+  const { service, config, graphRecover, graphTick, trackSecret } = await assembleDaemon({
     stateDir,
     projectDir,
   })
@@ -747,6 +757,7 @@ export async function runDaemon(args: readonly string[], stateDir: string): Prom
 
   await service.start()
   const handle = await startControlPlane(service, { host: config.daemon.host, port })
+  trackSecret(handle.token)
   // Recovery can involve hours of inline agent execution: it runs after
   // the control plane is up so the API, SSE, and cancel stay available.
   void graphRecover().catch((error) => {
