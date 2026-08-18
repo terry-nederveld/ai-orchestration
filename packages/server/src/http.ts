@@ -9,6 +9,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { Logger } from '@overture/core'
 import { noopLogger } from '@overture/core'
 import type { OvertureService } from './service.js'
+import { parseDefinitionKind, parseDefinitionLifecycle, parseWaitKind } from './service.js'
 
 export interface ControlPlaneOptions {
   readonly host?: string
@@ -223,6 +224,144 @@ async function route(
     const periodStart = start ? new Date(start) : new Date(now.getTime() - 30 * 86_400_000)
     const periodEnd = end ? new Date(end) : now
     sendJson(response, 200, await service.usageTotals(periodStart, periodEnd))
+    return
+  }
+
+  if (method === 'GET' && path === '/api/waits') {
+    const runId = url.searchParams.get('runId')
+    const type = url.searchParams.get('type')
+    const reason = url.searchParams.get('reason')
+    const kind = type ? parseWaitKind(type) : undefined
+    if (type && !kind) {
+      sendJson(response, 400, { error: `unknown wait type '${type}'` })
+      return
+    }
+    sendJson(
+      response,
+      200,
+      await service.listWaits({
+        ...(runId ? { runId } : {}),
+        ...(kind ? { kind } : {}),
+        ...(reason ? { reason } : {}),
+      }),
+    )
+    return
+  }
+
+  const waitRespondMatch = path.match(/^\/api\/waits\/([^/]+)\/respond$/)
+  if (method === 'POST' && waitRespondMatch?.[1]) {
+    const waitId = decodeId(waitRespondMatch[1])
+    if (!waitId) {
+      sendJson(response, 400, { error: 'invalid wait id' })
+      return
+    }
+    const body = await readJson(request)
+    if (body === null || typeof body !== 'object' || !('value' in body)) {
+      sendJson(response, 400, { error: 'value is required' })
+      return
+    }
+    const respondedBy = stringField(body, 'respondedBy')
+    const result = await service.respondToWait(waitId, {
+      value: (body as Record<string, unknown>).value,
+      ...(respondedBy ? { respondedBy } : {}),
+    })
+    switch (result.outcome) {
+      case 'accepted':
+        sendJson(response, 200, { accepted: true })
+        return
+      case 'not-found':
+        sendJson(response, 404, { error: 'wait not found' })
+        return
+      case 'invalid':
+        sendJson(response, 400, { error: result.reason })
+        return
+      case 'unavailable':
+        sendJson(response, 503, { error: 'graph runtime is not available in this daemon' })
+        return
+      default:
+        sendJson(response, 409, {
+          accepted: false,
+          error: result.reason,
+          ...(result.winner ? { winner: result.winner } : {}),
+        })
+        return
+    }
+  }
+
+  if (method === 'GET' && path === '/api/definitions') {
+    const rawKind = url.searchParams.get('kind')
+    const kind = rawKind ? parseDefinitionKind(rawKind) : undefined
+    if (rawKind && !kind) {
+      sendJson(response, 400, { error: `unknown definition kind '${rawKind}'` })
+      return
+    }
+    sendJson(response, 200, await service.listDefinitions(kind))
+    return
+  }
+
+  const lifecycleMatch = path.match(/^\/api\/definitions\/([^/]+)\/([^/]+)\/lifecycle$/)
+  if (method === 'POST' && lifecycleMatch?.[1] && lifecycleMatch[2]) {
+    const kind = parseDefinitionKind(decodeId(lifecycleMatch[1]) ?? '')
+    const name = decodeId(lifecycleMatch[2])
+    if (!kind || !name) {
+      sendJson(response, 400, { error: 'invalid definition reference' })
+      return
+    }
+    const body = await readJson(request)
+    const lifecycle = parseDefinitionLifecycle(stringField(body, 'lifecycle') ?? '')
+    if (!lifecycle) {
+      sendJson(response, 400, { error: 'lifecycle must be draft, enabled, or disabled' })
+      return
+    }
+    const status = await service.setDefinitionLifecycle(kind, name, lifecycle)
+    if (!status) sendJson(response, 404, { error: 'definition not found' })
+    else sendJson(response, 200, status)
+    return
+  }
+
+  const definitionMatch = path.match(/^\/api\/definitions\/([^/]+)\/([^/]+)$/)
+  if ((method === 'GET' || method === 'PUT') && definitionMatch?.[1] && definitionMatch[2]) {
+    const kind = parseDefinitionKind(decodeId(definitionMatch[1]) ?? '')
+    const name = decodeId(definitionMatch[2])
+    if (!kind || !name) {
+      sendJson(response, 400, { error: 'invalid definition reference' })
+      return
+    }
+    if (method === 'GET') {
+      const rawVersion = url.searchParams.get('version')
+      const version = rawVersion ? Number(rawVersion) : undefined
+      if (rawVersion && (!Number.isInteger(version) || (version as number) < 1)) {
+        sendJson(response, 400, { error: 'invalid version' })
+        return
+      }
+      const detail = await service.getDefinition(kind, name, version)
+      if (!detail) sendJson(response, 404, { error: 'definition not found' })
+      else sendJson(response, 200, detail)
+      return
+    }
+    const body = await readJson(request)
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+      sendJson(response, 400, { error: 'document body is required' })
+      return
+    }
+    sendJson(
+      response,
+      201,
+      await service.saveDefinition(kind, name, body as Record<string, unknown>),
+    )
+    return
+  }
+
+  const graphRunMatch = path.match(/^\/api\/graph-runs\/([^/]+)$/)
+  if (method === 'GET' && graphRunMatch?.[1]) {
+    const graphRunId = decodeId(graphRunMatch[1])
+    if (!graphRunId) {
+      sendJson(response, 400, { error: 'invalid run id' })
+      return
+    }
+    const view = await service.getGraphRun(graphRunId)
+    if (!view) sendJson(response, 404, { error: 'graph run not found' })
+    else sendJson(response, 200, view)
     return
   }
 

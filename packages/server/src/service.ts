@@ -7,6 +7,9 @@
 import type {
   AgentProvider,
   Clock,
+  DefinitionLifecycle,
+  DefinitionStatus,
+  DefinitionVersion,
   EventBus,
   IdGenerator,
   Logger,
@@ -16,14 +19,23 @@ import type {
   ProviderAvailability,
   ProviderInfo,
   Run,
+  RunGraphState,
   UsageRecord,
+  WaitCondition,
+  WaitKind,
   WorkflowDefinition,
   WorkflowProvider,
   WorkItem,
   WorkProvider,
   WorkQuery,
 } from '@overture/core'
-import { asId, RunState } from '@overture/core'
+import {
+  asId,
+  DefinitionKind,
+  InputValidationFailure,
+  RunState,
+  validateHumanInputValue,
+} from '@overture/core'
 import type { RunCoordinator, Scheduler } from '@overture/orchestrator'
 import { selectWorkflow } from '@overture/orchestrator'
 import { parseWorkflowYaml, WorkflowValidationError } from '@overture/workflow'
@@ -42,6 +54,85 @@ export interface ServiceStatus {
   readonly workflows: readonly string[]
 }
 
+/**
+ * Satisfy port of the durable graph runtime (GraphRunCoordinator.satisfy).
+ * A narrow structural interface so assemblies without the graph coordinator
+ * still typecheck.
+ */
+export interface GraphWaitCoordinator {
+  satisfy(
+    waitId: string,
+    response: {
+      readonly responder: string
+      readonly channel: 'app' | 'work_item'
+      readonly value?: unknown
+      readonly event?: Readonly<Record<string, unknown>>
+    },
+  ): Promise<{ readonly accepted: boolean; readonly reason?: string }>
+}
+
+/** Work-centric view of a durable graph run. */
+export interface GraphRunView {
+  readonly run?: Run
+  /** Persisted graph state with `resultHistory` ordered newest-first. */
+  readonly state: RunGraphState
+  readonly openWaits: readonly WaitCondition[]
+}
+
+export interface DefinitionDetail {
+  readonly kind: DefinitionKind
+  readonly name: string
+  readonly lifecycle: DefinitionLifecycle
+  readonly latestVersion: number
+  /** The requested (or latest) version, document included. */
+  readonly definition: DefinitionVersion
+  /** Version history, newest first. */
+  readonly versions: ReadonlyArray<Pick<DefinitionVersion, 'version' | 'contentHash' | 'createdAt'>>
+}
+
+export type WaitRespondOutcome =
+  | { readonly outcome: 'accepted' }
+  | { readonly outcome: 'not-found' }
+  | { readonly outcome: 'unavailable' }
+  | { readonly outcome: 'invalid'; readonly reason: string }
+  | {
+      readonly outcome: 'conflict'
+      readonly reason: string
+      /** Summary of the response that won the first-valid-response race. */
+      readonly winner?: {
+        readonly at: Date
+        readonly responder?: string
+        readonly channel?: string
+        readonly value?: unknown
+      }
+    }
+
+const WAIT_KINDS: readonly WaitKind[] = [
+  'human-input',
+  'approval',
+  'time',
+  'external-event',
+  'dependency',
+  'provider-availability',
+  'work-item-event',
+]
+
+export function parseWaitKind(raw: string): WaitKind | undefined {
+  return (WAIT_KINDS as readonly string[]).includes(raw) ? (raw as WaitKind) : undefined
+}
+
+export function parseDefinitionKind(raw: string): DefinitionKind | undefined {
+  return (Object.values(DefinitionKind) as readonly string[]).includes(raw)
+    ? (raw as DefinitionKind)
+    : undefined
+}
+
+const LIFECYCLES: readonly DefinitionLifecycle[] = ['draft', 'enabled', 'disabled']
+
+export function parseDefinitionLifecycle(raw: string): DefinitionLifecycle | undefined {
+  return (LIFECYCLES as readonly string[]).includes(raw) ? (raw as DefinitionLifecycle) : undefined
+}
+
 export interface OvertureServiceDeps {
   readonly version: string
   /**
@@ -50,6 +141,17 @@ export interface OvertureServiceDeps {
    * review's SECRETS-PERSIST finding). Identity when omitted.
    */
   readonly redactEvent?: (event: OrchestratorEvent) => OrchestratorEvent
+  /**
+   * Applied to every control-plane response payload before it leaves the
+   * process, scrubbing secret values just like `redactEvent` does for the
+   * event stream. Identity when omitted.
+   */
+  readonly redactPayload?: (payload: unknown) => unknown
+  /**
+   * Durable graph runtime coordinator (Phase 2). Optional so v1-only
+   * assemblies still work; wait responses report 'unavailable' without it.
+   */
+  readonly graphCoordinator?: GraphWaitCoordinator
   readonly persistence: PersistenceProvider
   readonly events: EventBus
   readonly scheduler: Scheduler
@@ -284,6 +386,157 @@ export class OvertureService {
 
   usageTotals(periodStart: Date, periodEnd: Date): Promise<readonly UsageRecord[]> {
     return this.deps.persistence.usage.totalsForPeriod(periodStart, periodEnd)
+  }
+
+  // ----- durable waits (Phase 2) -----------------------------------------
+
+  async listWaits(filter?: {
+    readonly runId?: string
+    readonly kind?: WaitKind
+    readonly reason?: string
+  }): Promise<readonly WaitCondition[]> {
+    const open = await this.deps.persistence.waits.listOpen({
+      ...(filter?.runId ? { runId: asId<'run'>(filter.runId) } : {}),
+      ...(filter?.kind ? { kind: filter.kind } : {}),
+    })
+    const matched = filter?.reason
+      ? open.filter((condition) => condition.parameters['reason'] === filter.reason)
+      : open
+    return this.redact(matched)
+  }
+
+  /**
+   * Answer a durable wait. Validates the typed value against the wait's
+   * request spec, then submits through the coordinator's satisfy path; the
+   * coordinator's CAS gives first-valid-response-wins semantics, and a lost
+   * race reports the winning response.
+   */
+  async respondToWait(
+    id: string,
+    response: { readonly value: unknown; readonly respondedBy?: string },
+  ): Promise<WaitRespondOutcome> {
+    const coordinator = this.deps.graphCoordinator
+    if (!coordinator) return { outcome: 'unavailable' }
+    const condition = await this.deps.persistence.waits.get(id)
+    if (!condition) return { outcome: 'not-found' }
+    if (condition.request) {
+      try {
+        validateHumanInputValue(condition.request, response.value)
+      } catch (error) {
+        if (error instanceof InputValidationFailure) {
+          return { outcome: 'invalid', reason: error.message }
+        }
+        throw error
+      }
+    }
+    const result = await coordinator.satisfy(id, {
+      responder: response.respondedBy ?? 'app',
+      channel: 'app',
+      value: response.value,
+    })
+    if (result.accepted) return { outcome: 'accepted' }
+    const settled = await this.deps.persistence.waits.get(id)
+    const winning = settled?.satisfaction
+    return this.redact({
+      outcome: 'conflict',
+      reason: result.reason ?? 'already satisfied',
+      ...(winning
+        ? {
+            winner: {
+              at: winning.at,
+              ...(winning.input
+                ? {
+                    responder: winning.input.responder,
+                    channel: winning.input.channel,
+                    value: winning.input.value,
+                  }
+                : {}),
+            },
+          }
+        : {}),
+    })
+  }
+
+  // ----- definitions -----------------------------------------------------
+
+  async listDefinitions(kind?: DefinitionKind): Promise<readonly DefinitionStatus[]> {
+    const kinds = kind ? [kind] : Object.values(DefinitionKind)
+    const statuses: DefinitionStatus[] = []
+    for (const each of kinds) {
+      statuses.push(...(await this.deps.persistence.definitions.list(each)))
+    }
+    return this.redact(statuses)
+  }
+
+  async getDefinition(
+    kind: DefinitionKind,
+    name: string,
+    version?: number,
+  ): Promise<DefinitionDetail | undefined> {
+    const store = this.deps.persistence.definitions
+    const definition = await store.get(kind, name, version)
+    if (!definition) return undefined
+    const [lifecycle, versions] = await Promise.all([
+      store.getLifecycle(kind, name),
+      store.listVersions(kind, name),
+    ])
+    const history = [...versions]
+      .sort((a, b) => b.version - a.version)
+      .map((entry) => ({
+        version: entry.version,
+        contentHash: entry.contentHash,
+        createdAt: entry.createdAt,
+      }))
+    return this.redact({
+      kind,
+      name,
+      lifecycle,
+      latestVersion: history[0]?.version ?? definition.version,
+      definition,
+      versions: history,
+    })
+  }
+
+  async saveDefinition(
+    kind: DefinitionKind,
+    name: string,
+    document: Readonly<Record<string, unknown>>,
+  ): Promise<DefinitionVersion> {
+    return this.redact(await this.deps.persistence.definitions.save(kind, name, document))
+  }
+
+  async setDefinitionLifecycle(
+    kind: DefinitionKind,
+    name: string,
+    lifecycle: DefinitionLifecycle,
+  ): Promise<DefinitionStatus | undefined> {
+    const store = this.deps.persistence.definitions
+    const existing = await store.get(kind, name)
+    if (!existing) return undefined
+    await store.setLifecycle(kind, name, lifecycle)
+    return this.redact({ kind, name, lifecycle, latestVersion: existing.version })
+  }
+
+  // ----- graph runs ------------------------------------------------------
+
+  async getGraphRun(id: string): Promise<GraphRunView | undefined> {
+    const runId = asId<'run'>(id)
+    const state = await this.deps.persistence.runGraphs.get(runId)
+    if (!state) return undefined
+    const [run, openWaits] = await Promise.all([
+      this.deps.persistence.runs.get(runId),
+      this.deps.persistence.waits.listOpen({ runId }),
+    ])
+    return this.redact({
+      ...(run ? { run } : {}),
+      state: { ...state, resultHistory: [...state.resultHistory].reverse() },
+      openWaits,
+    })
+  }
+
+  private redact<T>(payload: T): T {
+    const redact = this.deps.redactPayload
+    return redact ? (redact(payload) as T) : payload
   }
 
   // ----- events ----------------------------------------------------------

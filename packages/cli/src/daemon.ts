@@ -506,6 +506,7 @@ export async function assembleDaemon(options: {
   const service = new OvertureService({
     version: VERSION,
     redactEvent: (event) => redactor.redactObject(event),
+    redactPayload: (payload) => redactor.redactObject(payload),
     persistence,
     events,
     scheduler,

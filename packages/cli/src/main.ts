@@ -261,6 +261,121 @@ const commands: Record<string, { description: string; run: Command }> = {
       return 0
     },
   },
+  waits: {
+    description: 'List and answer durable waits (waits [list|respond <id> --value <v>])',
+    run: async (context) => {
+      const client = await makeClient(context)
+      const [subcommand = 'list', id] = context.args
+      if (subcommand === 'list') {
+        const params = new URLSearchParams()
+        const run = flagValue(context.args, '--run')
+        const type = flagValue(context.args, '--type')
+        const reason = flagValue(context.args, '--reason')
+        if (run) params.set('runId', run)
+        if (type) params.set('type', type)
+        if (reason) params.set('reason', reason)
+        const query = params.toString()
+        const waits = await client.get<
+          Array<{
+            id: string
+            runId: string
+            nodeId: string
+            kind: string
+            createdAt: string
+            request?: { type: string; prompt: string }
+          }>
+        >(`/api/waits${query ? `?${query}` : ''}`)
+        if (waits.length === 0) {
+          console.log('no open waits')
+          return 0
+        }
+        console.log(
+          renderTable(waits, [
+            { header: 'WAIT', value: (wait) => wait.id },
+            { header: 'RUN', value: (wait) => shortId(wait.runId) },
+            { header: 'NODE', value: (wait) => wait.nodeId },
+            { header: 'KIND', value: (wait) => wait.kind },
+            { header: 'PROMPT', value: (wait) => wait.request?.prompt.slice(0, 60) ?? '' },
+            { header: 'OPENED', value: (wait) => formatDate(wait.createdAt) },
+          ]),
+        )
+        return 0
+      }
+      if (subcommand === 'respond') {
+        const raw = flagValue(context.args, '--value')
+        if (!id || raw === undefined) {
+          console.error('usage: overture waits respond <id> --value <v> [--by <responder>]')
+          return 2
+        }
+        const respondedBy = flagValue(context.args, '--by')
+        await client.post(`/api/waits/${encodeURIComponent(id)}/respond`, {
+          value: parseValueFlag(raw),
+          ...(respondedBy ? { respondedBy } : {}),
+        })
+        console.log('response accepted')
+        return 0
+      }
+      console.error(`unknown waits subcommand: ${subcommand}`)
+      return 2
+    },
+  },
+  definitions: {
+    description:
+      'Manage versioned definitions (definitions [list [kind]|enable|disable <kind> <name>])',
+    run: async (context) => {
+      const client = await makeClient(context)
+      const [subcommand = 'list', kind, name] = context.args
+      if (subcommand === 'list') {
+        const query = kind ? `?kind=${encodeURIComponent(kind)}` : ''
+        const definitions = await client.get<
+          Array<{ kind: string; name: string; lifecycle: string; latestVersion: number }>
+        >(`/api/definitions${query}`)
+        if (definitions.length === 0) {
+          console.log('no definitions stored')
+          return 0
+        }
+        console.log(
+          renderTable(definitions, [
+            { header: 'KIND', value: (definition) => definition.kind },
+            { header: 'NAME', value: (definition) => definition.name },
+            { header: 'LIFECYCLE', value: (definition) => definition.lifecycle },
+            { header: 'LATEST', value: (definition) => `v${definition.latestVersion}` },
+          ]),
+        )
+        return 0
+      }
+      if (subcommand === 'enable' || subcommand === 'disable') {
+        if (!kind || !name) {
+          console.error(`usage: overture definitions ${subcommand} <kind> <name>`)
+          return 2
+        }
+        await client.post(
+          `/api/definitions/${encodeURIComponent(kind)}/${encodeURIComponent(name)}/lifecycle`,
+          { lifecycle: subcommand === 'enable' ? 'enabled' : 'disabled' },
+        )
+        console.log(`${kind}/${name} ${subcommand}d`)
+        return 0
+      }
+      console.error(`unknown definitions subcommand: ${subcommand}`)
+      return 2
+    },
+  },
+  'graph-run': {
+    description: 'Inspect a durable graph run (graph-run show <id>)',
+    run: async (context) => {
+      const [subcommand, id] = context.args
+      if (subcommand !== 'show' || !id) {
+        console.error('usage: overture graph-run show <id>')
+        return 2
+      }
+      const client = await makeClient(context)
+      const view = await client.get<Record<string, unknown>>(
+        `/api/graph-runs/${encodeURIComponent(id)}`,
+      )
+      console.log(JSON.stringify(view, null, 2))
+      return 0
+    },
+  },
   usage: {
     description: 'Show usage totals for the last 30 days',
     run: async (context) => {
@@ -388,6 +503,15 @@ function validateLocally(source: string): { valid: boolean; issues: string[] } {
 async function makeClient(context: Context): Promise<DaemonClient> {
   const connection = await connect(context.stateDir)
   return new DaemonClient(connection)
+}
+
+/** Typed wait responses: JSON when it parses (true, 42, ["a"]), raw string otherwise. */
+function parseValueFlag(raw: string): unknown {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return raw
+  }
 }
 
 function flagValue(args: readonly string[], flag: string): string | undefined {

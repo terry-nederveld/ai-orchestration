@@ -5,11 +5,18 @@ import {
   type AgentOutcome,
   type AgentRunHandle,
   type AgentRunRequest,
+  asId,
+  type GraphNodeResult,
+  type HumanInputRequestSpec,
   type IdGenerator,
   InMemoryEventBus,
+  initialRunGraphState,
   noopLogger,
+  type Run,
   RunState,
   systemClock,
+  type WaitCondition,
+  type WaitKind,
 } from '@overture/core'
 import {
   builtinActionFactory,
@@ -23,8 +30,10 @@ import { InMemoryWorkflowProvider, parseWorkflowYaml } from '@overture/workflow'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ApprovalBroker } from './approvals.js'
 import { type ControlPlaneHandle, startControlPlane } from './http.js'
-import { OvertureService } from './service.js'
+import { type GraphWaitCoordinator, OvertureService, type OvertureServiceDeps } from './service.js'
 import { readDaemonInfo, writeDaemonInfo } from './state-dir.js'
+
+const SECRET = 'tok-9f8e7d6c5b4a-hunter2'
 
 const WORKFLOW = `
 name: mini
@@ -72,6 +81,8 @@ describe('control plane', () => {
   let handle: ControlPlaneHandle
   let service: OvertureService
   let work: FakeWorkProvider
+  let persistence: InMemoryPersistenceProvider
+  let serviceDeps: OvertureServiceDeps
 
   const api = (path: string, init?: RequestInit & { token?: string }) =>
     fetch(`http://127.0.0.1:${handle.port}${path}`, {
@@ -88,7 +99,7 @@ describe('control plane', () => {
     work = new FakeWorkProvider([
       makeWorkItem({ externalId: 'ISSUE-1', state: 'Ready', title: 'Do the thing' }),
     ])
-    const persistence = new InMemoryPersistenceProvider()
+    persistence = new InMemoryPersistenceProvider()
     const bus = new InMemoryEventBus()
     const ids = new SequentialIds()
     const approvals = new ApprovalBroker(ids)
@@ -125,8 +136,47 @@ describe('control plane', () => {
       logger: noopLogger,
       pollIntervalMs: 3_600_000,
     })
-    service = new OvertureService({
+    // Mirrors GraphRunCoordinator.satisfy: wins-or-supplements via the wait
+    // repository's CAS, without dragging the whole graph runtime into the
+    // harness.
+    const graphCoordinator: GraphWaitCoordinator = {
+      satisfy: async (waitId, response) => {
+        const condition = await persistence.waits.get(waitId)
+        if (!condition) return { accepted: false, reason: 'unknown wait' }
+        const input =
+          response.value !== undefined
+            ? {
+                requestId: waitId,
+                responder: response.responder,
+                channel: response.channel,
+                at: systemClock.now(),
+                value: response.value,
+              }
+            : undefined
+        const won = await persistence.waits.trySatisfy(waitId, {
+          kind: condition.kind,
+          at: systemClock.now(),
+          ...(input ? { input } : {}),
+        })
+        if (!won) {
+          if (input) {
+            await persistence.waits.addSupplemental({ waitId, runId: condition.runId, input })
+          }
+          return { accepted: false, reason: 'already satisfied; recorded as supplemental context' }
+        }
+        return { accepted: true }
+      },
+    }
+    const redactPayload = (payload: unknown): unknown => {
+      const serialized = JSON.stringify(payload)
+      return serialized.includes(SECRET)
+        ? JSON.parse(serialized.split(SECRET).join('[redacted]'))
+        : payload
+    }
+    serviceDeps = {
       version: '0.1.0-test',
+      redactPayload,
+      graphCoordinator,
       persistence,
       events: bus,
       scheduler,
@@ -139,7 +189,8 @@ describe('control plane', () => {
       clock: systemClock,
       ids,
       logger: noopLogger,
-    })
+    }
+    service = new OvertureService(serviceDeps)
     handle = await startControlPlane(service)
   })
 
@@ -272,6 +323,333 @@ describe('control plane', () => {
     }
     controller.abort()
     expect(buffer).toContain('run.state.changed')
+  })
+
+  function makeWait(
+    overrides: {
+      readonly id?: string
+      readonly runId?: string
+      readonly nodeId?: string
+      readonly kind?: WaitKind
+      readonly parameters?: Readonly<Record<string, unknown>>
+      readonly request?: HumanInputRequestSpec
+      readonly noRequest?: boolean
+    } = {},
+  ): WaitCondition {
+    return {
+      id: overrides.id ?? 'wait-1',
+      runId: asId<'run'>(overrides.runId ?? 'run-1'),
+      nodeId: overrides.nodeId ?? 'ask-user',
+      kind: overrides.kind ?? 'human-input',
+      parameters: overrides.parameters ?? {},
+      ...(overrides.noRequest
+        ? {}
+        : {
+            request: overrides.request ?? {
+              type: 'text',
+              prompt: 'Which color?',
+              surface: 'app',
+            },
+          }),
+      status: 'open',
+      createdAt: systemClock.now(),
+    }
+  }
+
+  describe('waits', () => {
+    it('lists open waits with runId, type, and reason filters', async () => {
+      await persistence.waits.save(makeWait({ id: 'wait-a', runId: 'run-1' }))
+      await persistence.waits.save(
+        makeWait({
+          id: 'wait-b',
+          runId: 'run-2',
+          kind: 'time',
+          noRequest: true,
+          parameters: { reason: 'cooldown' },
+        }),
+      )
+
+      const all = await (await api('/api/waits')).json()
+      expect(all).toHaveLength(2)
+      const humanWait = all.find((wait: { id: string }) => wait.id === 'wait-a')
+      expect(humanWait.request).toEqual({ type: 'text', prompt: 'Which color?', surface: 'app' })
+
+      const byRun = await (await api('/api/waits?runId=run-1')).json()
+      expect(byRun.map((wait: { id: string }) => wait.id)).toEqual(['wait-a'])
+
+      const byType = await (await api('/api/waits?type=time')).json()
+      expect(byType.map((wait: { id: string }) => wait.id)).toEqual(['wait-b'])
+
+      const byReason = await (await api('/api/waits?reason=cooldown')).json()
+      expect(byReason.map((wait: { id: string }) => wait.id)).toEqual(['wait-b'])
+
+      expect((await api('/api/waits?type=bogus')).status).toBe(400)
+    })
+
+    it('accepts a valid response and satisfies the wait', async () => {
+      await persistence.waits.save(makeWait())
+      const response = await api('/api/waits/wait-1/respond', {
+        method: 'POST',
+        body: JSON.stringify({ value: 'blue', respondedBy: 'terry' }),
+      })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ accepted: true })
+
+      const settled = await persistence.waits.get('wait-1')
+      expect(settled?.status).toBe('satisfied')
+      expect(settled?.satisfaction?.input?.value).toBe('blue')
+      expect(settled?.satisfaction?.input?.responder).toBe('terry')
+    })
+
+    it('rejects a value that fails the request spec with 400', async () => {
+      await persistence.waits.save(
+        makeWait({ request: { type: 'boolean', prompt: 'Proceed?', surface: 'app' } }),
+      )
+      const response = await api('/api/waits/wait-1/respond', {
+        method: 'POST',
+        body: JSON.stringify({ value: 'yes' }),
+      })
+      expect(response.status).toBe(400)
+      const body = await response.json()
+      expect(body.error).toContain('true or false')
+      expect((await persistence.waits.get('wait-1'))?.status).toBe('open')
+    })
+
+    it('returns 409 with the winning response for a lost race', async () => {
+      await persistence.waits.save(makeWait())
+      await persistence.waits.trySatisfy('wait-1', {
+        kind: 'human-input',
+        at: systemClock.now(),
+        input: {
+          requestId: 'wait-1',
+          responder: 'alice',
+          channel: 'app',
+          at: systemClock.now(),
+          value: 'first answer',
+        },
+      })
+
+      const response = await api('/api/waits/wait-1/respond', {
+        method: 'POST',
+        body: JSON.stringify({ value: 'second answer', respondedBy: 'bob' }),
+      })
+      expect(response.status).toBe(409)
+      const body = await response.json()
+      expect(body.accepted).toBe(false)
+      expect(body.winner.responder).toBe('alice')
+      expect(body.winner.value).toBe('first answer')
+
+      const supplemental = await persistence.waits.listSupplemental(asId<'run'>('run-1'))
+      expect(supplemental).toHaveLength(1)
+      expect(supplemental[0]?.input.value).toBe('second answer')
+    })
+
+    it('returns 404 for an unknown wait', async () => {
+      const response = await api('/api/waits/wait-nope/respond', {
+        method: 'POST',
+        body: JSON.stringify({ value: 'x' }),
+      })
+      expect(response.status).toBe(404)
+    })
+
+    it('returns 503 when no graph coordinator is assembled', async () => {
+      const { graphCoordinator: _omitted, ...v1Deps } = serviceDeps
+      const bare = new OvertureService(v1Deps)
+      const bareHandle = await startControlPlane(bare)
+      try {
+        await persistence.waits.save(makeWait())
+        const response = await fetch(
+          `http://127.0.0.1:${bareHandle.port}/api/waits/wait-1/respond`,
+          {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${bareHandle.token}`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({ value: 'blue' }),
+          },
+        )
+        expect(response.status).toBe(503)
+      } finally {
+        await bareHandle.close()
+      }
+    })
+
+    it('redacts secret values before they leave the control plane', async () => {
+      await persistence.waits.save(makeWait({ id: 'wait-open', parameters: { hint: SECRET } }))
+      const listed = await (await api('/api/waits')).text()
+      expect(listed).not.toContain(SECRET)
+      expect(listed).toContain('[redacted]')
+
+      await persistence.waits.save(makeWait({ id: 'wait-won', runId: 'run-2' }))
+      await persistence.waits.trySatisfy('wait-won', {
+        kind: 'human-input',
+        at: systemClock.now(),
+        input: {
+          requestId: 'wait-won',
+          responder: 'alice',
+          channel: 'app',
+          at: systemClock.now(),
+          value: `the token is ${SECRET}`,
+        },
+      })
+      const conflict = await api('/api/waits/wait-won/respond', {
+        method: 'POST',
+        body: JSON.stringify({ value: 'late answer' }),
+      })
+      expect(conflict.status).toBe(409)
+      const body = JSON.stringify(await conflict.json())
+      expect(body).not.toContain(SECRET)
+      expect(body).toContain('[redacted]')
+    })
+  })
+
+  describe('definitions', () => {
+    it('saves, lists, and versions definitions', async () => {
+      const first = await api('/api/definitions/workflow/greeter', {
+        method: 'PUT',
+        body: JSON.stringify({ steps: ['hello'] }),
+      })
+      expect(first.status).toBe(201)
+      expect((await first.json()).version).toBe(1)
+
+      const second = await api('/api/definitions/workflow/greeter', {
+        method: 'PUT',
+        body: JSON.stringify({ steps: ['hello', 'goodbye'] }),
+      })
+      expect((await second.json()).version).toBe(2)
+
+      const list = await (await api('/api/definitions')).json()
+      expect(list).toEqual([
+        { kind: 'workflow', name: 'greeter', lifecycle: 'draft', latestVersion: 2 },
+      ])
+      expect(await (await api('/api/definitions?kind=rubric')).json()).toEqual([])
+      expect((await api('/api/definitions?kind=gadget')).status).toBe(400)
+
+      const detail = await (await api('/api/definitions/workflow/greeter')).json()
+      expect(detail.lifecycle).toBe('draft')
+      expect(detail.latestVersion).toBe(2)
+      expect(detail.definition.document).toEqual({ steps: ['hello', 'goodbye'] })
+      expect(detail.versions.map((entry: { version: number }) => entry.version)).toEqual([2, 1])
+
+      const pinned = await (await api('/api/definitions/workflow/greeter?version=1')).json()
+      expect(pinned.definition.document).toEqual({ steps: ['hello'] })
+
+      expect((await api('/api/definitions/workflow/nope')).status).toBe(404)
+      expect((await api('/api/definitions/gadget/greeter')).status).toBe(400)
+      expect((await api('/api/definitions/workflow/greeter?version=zero')).status).toBe(400)
+    })
+
+    it('drives the definition lifecycle', async () => {
+      await api('/api/definitions/workflow/greeter', {
+        method: 'PUT',
+        body: JSON.stringify({ steps: ['hello'] }),
+      })
+
+      const enabled = await api('/api/definitions/workflow/greeter/lifecycle', {
+        method: 'POST',
+        body: JSON.stringify({ lifecycle: 'enabled' }),
+      })
+      expect(enabled.status).toBe(200)
+      expect((await enabled.json()).lifecycle).toBe('enabled')
+      expect((await (await api('/api/definitions/workflow/greeter')).json()).lifecycle).toBe(
+        'enabled',
+      )
+
+      const disabled = await api('/api/definitions/workflow/greeter/lifecycle', {
+        method: 'POST',
+        body: JSON.stringify({ lifecycle: 'disabled' }),
+      })
+      expect((await disabled.json()).lifecycle).toBe('disabled')
+
+      const invalid = await api('/api/definitions/workflow/greeter/lifecycle', {
+        method: 'POST',
+        body: JSON.stringify({ lifecycle: 'archived' }),
+      })
+      expect(invalid.status).toBe(400)
+
+      const missing = await api('/api/definitions/workflow/nope/lifecycle', {
+        method: 'POST',
+        body: JSON.stringify({ lifecycle: 'enabled' }),
+      })
+      expect(missing.status).toBe(404)
+    })
+  })
+
+  describe('graph runs', () => {
+    it('returns the persisted state, run record, and open waits', async () => {
+      const runId = asId<'run'>('run-9')
+      const run: Run = {
+        id: runId,
+        workItemId: asId<'work-item'>('fake:ISSUE-1'),
+        workflowName: 'mini@1',
+        state: RunState.WaitingForHuman,
+        sessionIds: [],
+        createdAt: systemClock.now(),
+        updatedAt: systemClock.now(),
+        history: [],
+      }
+      await persistence.runs.save(run)
+      const older: GraphNodeResult = {
+        nodeId: 'plan',
+        attempt: 1,
+        status: 'succeeded',
+        outputs: { summary: 'planned' },
+        startedAt: new Date(1_000),
+        settledAt: new Date(2_000),
+      }
+      const newer: GraphNodeResult = {
+        nodeId: 'build',
+        attempt: 1,
+        status: 'succeeded',
+        outputs: { summary: 'built' },
+        startedAt: new Date(3_000),
+        settledAt: new Date(4_000),
+      }
+      await persistence.runGraphs.save({
+        ...initialRunGraphState(runId, 'snap-1'),
+        activeNodeIds: ['ask-user'],
+        waitingNodeIds: ['ask-user'],
+        nodeResults: { plan: older, build: newer },
+        resultHistory: [older, newer],
+        domain: { name: 'building', data: { step: 2 } },
+        specRevision: 3,
+        updatedAt: systemClock.now(),
+      })
+      await persistence.waits.save(makeWait({ id: 'wait-9', runId: 'run-9' }))
+
+      const response = await api('/api/graph-runs/run-9')
+      expect(response.status).toBe(200)
+      const view = await response.json()
+      expect(view.run.id).toBe('run-9')
+      expect(view.state.activeNodeIds).toEqual(['ask-user'])
+      expect(view.state.waitingNodeIds).toEqual(['ask-user'])
+      expect(view.state.specRevision).toBe(3)
+      expect(view.state.domain).toEqual({ name: 'building', data: { step: 2 } })
+      expect(view.state.resultHistory.map((result: { nodeId: string }) => result.nodeId)).toEqual([
+        'build',
+        'plan',
+      ])
+      expect(view.openWaits.map((wait: { id: string }) => wait.id)).toEqual(['wait-9'])
+
+      expect((await api('/api/graph-runs/run-nope')).status).toBe(404)
+    })
+  })
+
+  it('requires auth on all phase 2 routes', async () => {
+    const routes: ReadonlyArray<readonly [string, string]> = [
+      ['GET', '/api/waits'],
+      ['POST', '/api/waits/wait-1/respond'],
+      ['GET', '/api/definitions'],
+      ['GET', '/api/definitions/workflow/mini'],
+      ['PUT', '/api/definitions/workflow/mini'],
+      ['POST', '/api/definitions/workflow/mini/lifecycle'],
+      ['GET', '/api/graph-runs/run-1'],
+    ]
+    for (const [method, route] of routes) {
+      const response = await fetch(`http://127.0.0.1:${handle.port}${route}`, { method })
+      expect(response.status, `${method} ${route}`).toBe(401)
+    }
   })
 })
 
