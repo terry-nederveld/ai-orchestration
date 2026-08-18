@@ -46,6 +46,7 @@ export function fakeFetch(responses: readonly Response[]): {
 }
 
 interface FakeIssueRecord {
+  id: number
   number: number
   node_id: string
   title: string
@@ -69,6 +70,7 @@ export interface FakeIssueSeed {
 
 function serializeIssue(issue: FakeIssueRecord) {
   return {
+    id: issue.id,
     number: issue.number,
     node_id: issue.node_id,
     title: issue.title,
@@ -94,12 +96,14 @@ export class FakeGitHubBackend {
   private nextCommentId = 1
   private readonly issues = new Map<number, FakeIssueRecord>()
   private readonly comments = new Map<number, { id: number; body: string; created_at: string }[]>()
+  private readonly subIssues = new Map<number, number[]>()
 
   constructor(private readonly repo: string) {}
 
   addIssue(seed: FakeIssueSeed): number {
     const number = this.nextNumber++
     this.issues.set(number, {
+      id: 1000 + number,
       number,
       node_id: `issue_node_${number}`,
       title: seed.title,
@@ -119,6 +123,18 @@ export class FakeGitHubBackend {
     return this.issues.get(number)?.labels ?? []
   }
 
+  bodyOf(number: number): string | null {
+    return this.issues.get(number)?.body ?? null
+  }
+
+  /** Sub-issue numbers registered under a parent via the sub-issues endpoint. */
+  subIssuesOf(number: number): readonly number[] {
+    return this.subIssues.get(number) ?? []
+  }
+
+  /** When false, POST .../sub_issues answers 404 to model repos without sub-issues. */
+  subIssuesEnabled = true
+
   get fetchImpl(): typeof fetch {
     return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) =>
       this.handle(String(input), init ?? {})) as typeof fetch
@@ -135,6 +151,12 @@ export class FakeGitHubBackend {
 
     const listMatch = /^\/repos\/[^/]+\/[^/]+\/issues$/.exec(path)
     if (listMatch && method === 'GET') return this.handleList(u)
+    if (listMatch && method === 'POST') return this.handleCreate(init)
+
+    const subIssuesMatch = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/sub_issues$/.exec(path)
+    if (subIssuesMatch?.[1] && method === 'POST') {
+      return this.handleAddSubIssue(Number(subIssuesMatch[1]), init)
+    }
 
     const singleMatch = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)$/.exec(path)
     if (singleMatch?.[1]) return this.handleSingle(Number(singleMatch[1]), method, init)
@@ -184,6 +206,35 @@ export class FakeGitHubBackend {
       headers.link = `<${nextUrl.toString()}>; rel="next"`
     }
     return jsonResponse(200, pageItems.map(serializeIssue), headers)
+  }
+
+  private handleCreate(init: RequestInit): Response {
+    const body = JSON.parse(String(init.body ?? '{}')) as {
+      title: string
+      body?: string
+      labels?: string[]
+    }
+    const number = this.addIssue({
+      title: body.title,
+      ...(body.body !== undefined ? { body: body.body } : {}),
+      ...(body.labels !== undefined ? { labels: body.labels } : {}),
+    })
+    const issue = this.issues.get(number)
+    if (!issue) return jsonResponse(500, { message: 'fake backend lost the created issue' })
+    return jsonResponse(201, serializeIssue(issue))
+  }
+
+  private handleAddSubIssue(parentNumber: number, init: RequestInit): Response {
+    if (!this.subIssuesEnabled) return jsonResponse(404, { message: 'Not Found' })
+    const parent = this.issues.get(parentNumber)
+    if (!parent) return jsonResponse(404, { message: 'Not Found' })
+    const body = JSON.parse(String(init.body ?? '{}')) as { sub_issue_id: number }
+    const child = [...this.issues.values()].find((i) => i.id === body.sub_issue_id)
+    if (!child) return jsonResponse(404, { message: 'Sub-issue not found' })
+    const list = this.subIssues.get(parentNumber) ?? []
+    if (!list.includes(child.number)) list.push(child.number)
+    this.subIssues.set(parentNumber, list)
+    return jsonResponse(201, serializeIssue(child))
   }
 
   private handleSingle(number: number, method: string, init: RequestInit): Response {

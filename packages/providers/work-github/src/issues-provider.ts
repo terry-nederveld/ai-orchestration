@@ -12,8 +12,10 @@ import {
   type WorkClaim,
   type WorkComment,
   type WorkItem,
+  type WorkItemDraft,
   type WorkProvider,
   type WorkQuery,
+  type WorkRelationshipKind,
   type WorkStateInfo,
   type WorkTransition,
 } from '@overture/core'
@@ -50,6 +52,27 @@ export interface GitHubIssuesWorkProviderOptions {
 }
 
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE'
+
+/**
+ * Body reference line for relationships GitHub can't model natively. GitHub
+ * autolinks `#N`, so these render as real cross-references on both issues.
+ */
+function referenceLine(kind: WorkRelationshipKind, targetExternalId: string): string {
+  switch (kind) {
+    case 'child-of':
+      return `Part of #${targetExternalId}`
+    case 'parent-of':
+      return `Parent of #${targetExternalId}`
+    case 'blocks':
+      return `Blocks #${targetExternalId}`
+    case 'blocked-by':
+      return `Blocked by #${targetExternalId}`
+    case 'duplicates':
+      return `Duplicate of #${targetExternalId}`
+    default:
+      return `Relates to #${targetExternalId}`
+  }
+}
 
 export class GitHubIssuesWorkProvider implements WorkProvider {
   readonly info: ProviderInfo = {
@@ -245,6 +268,57 @@ export class GitHubIssuesWorkProvider implements WorkProvider {
     await this.patchIssue(container, item.externalId, { body: description })
   }
 
+  async createItem(draft: WorkItemDraft): Promise<WorkItem> {
+    const container = draft.container ?? this.repo
+    let body = draft.description
+    if (draft.relateTo) {
+      const line = referenceLine(draft.relateTo.kind, draft.relateTo.targetExternalId)
+      body = body ? `${body}\n\n${line}` : line
+    }
+
+    const response = await this.rawFetch(`/repos/${container}/issues`, {
+      method: 'POST',
+      body: JSON.stringify({
+        title: draft.title,
+        ...(body !== undefined ? { body } : {}),
+        ...(draft.labels?.length ? { labels: [...draft.labels] } : {}),
+      }),
+    })
+    if (!response.ok) throw await mapHttpErrorResponse(response)
+    const issue = (await response.json()) as GitHubIssue
+    return issueToWorkItem(issue, container, this.defaultBranch, this.stateLabels)
+  }
+
+  /**
+   * parent-of/child-of use the sub-issues REST endpoints (GA since 2025);
+   * repos where sub-issues are unavailable (404/410) fall back to a body
+   * reference line, which is also how every other relationship kind is
+   * modeled since GitHub has no native link type for them.
+   */
+  async linkItems(
+    from: WorkItem,
+    kind: WorkRelationshipKind,
+    targetExternalId: string,
+  ): Promise<void> {
+    const container = from.repository?.locator ?? this.repo
+    if (kind === 'parent-of' || kind === 'child-of') {
+      const parentNumber = kind === 'parent-of' ? from.externalId : targetExternalId
+      const childNumber = kind === 'parent-of' ? targetExternalId : from.externalId
+      const child = await this.fetchIssue(container, childNumber)
+      if (child.id !== undefined) {
+        const response = await this.rawFetch(
+          `/repos/${container}/issues/${parentNumber}/sub_issues`,
+          { method: 'POST', body: JSON.stringify({ sub_issue_id: child.id }) },
+        )
+        if (response.ok) return
+        if (response.status !== 404 && response.status !== 410) {
+          throw await mapHttpErrorResponse(response)
+        }
+      }
+    }
+    await this.appendBodyReference(container, from.externalId, referenceLine(kind, targetExternalId))
+  }
+
   async listStates(_container?: string): Promise<readonly WorkStateInfo[]> {
     return [
       { id: 'open', name: 'Open', category: 'todo' },
@@ -329,6 +403,16 @@ export class GitHubIssuesWorkProvider implements WorkProvider {
       body: JSON.stringify({ assignees }),
     })
     if (!response.ok) throw await mapHttpErrorResponse(response)
+  }
+
+  private async appendBodyReference(
+    container: string,
+    number: string,
+    line: string,
+  ): Promise<void> {
+    const current = await this.fetchIssue(container, number)
+    const body = current.body ? `${current.body}\n\n${line}` : line
+    await this.patchIssue(container, number, { body })
   }
 
   private async patchIssue(

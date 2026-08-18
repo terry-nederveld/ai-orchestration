@@ -10,6 +10,8 @@ export interface GitHubLabel {
 }
 
 export interface GitHubIssue {
+  /** Database id, required by the sub-issues endpoints (absent in some older fixtures). */
+  readonly id?: number
   readonly number: number
   readonly node_id: string
   readonly title: string

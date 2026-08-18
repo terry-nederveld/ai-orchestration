@@ -20,6 +20,7 @@ import {
   type WorkClaim,
   type WorkComment,
   type WorkItem,
+  type WorkItemDraft,
   type WorkProvider,
   type WorkQuery,
   type WorkStateInfo,
@@ -142,6 +143,14 @@ const ADD_COMMENT_MUTATION = `
 const UPDATE_ISSUE_BODY_MUTATION = `
   mutation($id: ID!, $body: String!) {
     updateIssue(input: { id: $id, body: $body }) { clientMutationId }
+  }
+`
+
+const ADD_DRAFT_ISSUE_MUTATION = `
+  mutation($projectId: ID!, $title: String!, $body: String) {
+    addProjectV2DraftIssue(input: { projectId: $projectId, title: $title, body: $body }) {
+      projectItem { ${ITEMS_FRAGMENT} }
+    }
   }
 `
 
@@ -336,6 +345,39 @@ export class GitHubProjectsWorkProvider implements WorkProvider {
       )
     }
     await this.graphql(UPDATE_ISSUE_BODY_MUTATION, { id: contentId, body: description })
+  }
+
+  /**
+   * Limitation: creating a real issue requires a repository, which a project
+   * doesn't have, so createItem() adds a *draft* item (type 'draft'). Drafts
+   * carry no labels or type, so those draft fields are ignored, and drafts
+   * can't be related to other items — linkItems is intentionally absent on
+   * this provider, and a relateTo request fails rather than silently
+   * dropping the relationship.
+   */
+  async createItem(draft: WorkItemDraft): Promise<WorkItem> {
+    if (draft.relateTo) {
+      throw new OrchestratorError(
+        'cannot relate a draft project item: drafts have no underlying issue to link',
+        'invalid-input',
+      )
+    }
+    const { projectId } = await this.resolveStatusField()
+    const data = await this.graphql<{
+      addProjectV2DraftIssue: { projectItem: ProjectV2Item | null } | null
+    }>(ADD_DRAFT_ISSUE_MUTATION, {
+      projectId,
+      title: draft.title,
+      body: draft.description ?? null,
+    })
+    const projectItem = data.addProjectV2DraftIssue?.projectItem
+    if (!projectItem) {
+      throw new OrchestratorError(
+        'addProjectV2DraftIssue returned no project item',
+        'corrupt-response',
+      )
+    }
+    return projectItemToWorkItem(projectItem, this.statusFieldName)
   }
 
   async listStates(): Promise<readonly WorkStateInfo[]> {

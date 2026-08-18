@@ -13,8 +13,10 @@ import {
   type WorkClaim,
   type WorkComment,
   type WorkItem,
+  type WorkItemDraft,
   type WorkProvider,
   type WorkQuery,
+  type WorkRelationshipKind,
   type WorkStateInfo,
   type WorkTransition,
 } from '@overture/core'
@@ -46,6 +48,18 @@ export interface JiraDataCenterWorkProviderOptions {
 
 const DEFAULT_LIMIT = 50
 const DEFAULT_CLAIM_LABEL = 'overture-claimed'
+
+/**
+ * Jira link type names for the kinds modeled as issue links. Data Center has
+ * no team-managed parent field — parent/child hierarchy only exists via
+ * sub-task issue types — so parent-of/child-of are not supported here.
+ */
+const LINK_TYPE_NAMES: Partial<Record<WorkRelationshipKind, string>> = {
+  blocks: 'Blocks',
+  'blocked-by': 'Blocks',
+  'relates-to': 'Relates',
+  duplicates: 'Duplicate',
+}
 
 function stripTrailingSlash(url: string): string {
   return url.endsWith('/') ? url.slice(0, -1) : url
@@ -231,6 +245,68 @@ export class JiraDataCenterWorkProvider implements WorkProvider {
     const response = await this.rawFetch(`/issue/${encodeURIComponent(item.externalId)}`, {
       method: 'PUT',
       body: JSON.stringify({ fields: { description } }),
+    })
+    if (!response.ok) throw await mapHttpErrorResponse(response)
+  }
+
+  async createItem(draft: WorkItemDraft): Promise<WorkItem> {
+    const projectKey = draft.container ?? this.projectKey
+    if (!projectKey) {
+      throw new OrchestratorError(
+        'createItem() requires a project key: set draft.container or configure projectKey',
+        'invalid-input',
+      )
+    }
+    if (draft.relateTo && !LINK_TYPE_NAMES[draft.relateTo.kind]) {
+      throw new OrchestratorError(
+        `unsupported relationship kind: ${draft.relateTo.kind}`,
+        'invalid-input',
+      )
+    }
+
+    const fields: Record<string, unknown> = {
+      project: { key: projectKey },
+      summary: draft.title,
+      issuetype: { name: draft.type ?? 'Task' },
+    }
+    if (draft.description !== undefined) fields.description = draft.description
+    if (draft.labels?.length) fields.labels = [...draft.labels]
+
+    const response = await this.rawFetch('/issue', {
+      method: 'POST',
+      body: JSON.stringify({ fields }),
+    })
+    if (!response.ok) throw await mapHttpErrorResponse(response)
+    const created = (await response.json()) as { key: string }
+
+    // The create response carries only id/key/self; re-fetch for the canonical item.
+    const item = await this.get(created.key)
+    if (draft.relateTo) {
+      await this.linkItems(item, draft.relateTo.kind, draft.relateTo.targetExternalId)
+    }
+    return item
+  }
+
+  async linkItems(
+    from: WorkItem,
+    kind: WorkRelationshipKind,
+    targetExternalId: string,
+  ): Promise<void> {
+    const typeName = LINK_TYPE_NAMES[kind]
+    if (!typeName) {
+      throw new OrchestratorError(`unsupported relationship kind: ${kind}`, 'invalid-input')
+    }
+    // The outward issue is the actor of the outward description ("blocks",
+    // "duplicates"); 'blocked-by' is the same Blocks link with roles swapped.
+    const outwardKey = kind === 'blocked-by' ? targetExternalId : from.externalId
+    const inwardKey = kind === 'blocked-by' ? from.externalId : targetExternalId
+    const response = await this.rawFetch('/issueLink', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: { name: typeName },
+        outwardIssue: { key: outwardKey },
+        inwardIssue: { key: inwardKey },
+      }),
     })
     if (!response.ok) throw await mapHttpErrorResponse(response)
   }

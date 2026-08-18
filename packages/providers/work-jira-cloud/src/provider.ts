@@ -12,8 +12,10 @@ import {
   type WorkClaim,
   type WorkComment,
   type WorkItem,
+  type WorkItemDraft,
   type WorkProvider,
   type WorkQuery,
+  type WorkRelationshipKind,
   type WorkStateInfo,
   type WorkTransition,
 } from '@overture/core'
@@ -46,6 +48,14 @@ export interface JiraCloudWorkProviderOptions {
 
 const DEFAULT_LIMIT = 50
 const DEFAULT_CLAIM_LABEL = 'overture-claimed'
+
+/** Jira link type names for the kinds modeled as issue links (parenting is a field, not a link). */
+const LINK_TYPE_NAMES: Partial<Record<WorkRelationshipKind, string>> = {
+  blocks: 'Blocks',
+  'blocked-by': 'Blocks',
+  'relates-to': 'Relates',
+  duplicates: 'Duplicate',
+}
 
 function resolveSiteHost(site: string): string {
   if (site.startsWith('http://') || site.startsWith('https://')) return new URL(site).host
@@ -235,6 +245,78 @@ export class JiraCloudWorkProvider implements WorkProvider {
     const response = await this.rawFetch(`/issue/${encodeURIComponent(item.externalId)}`, {
       method: 'PUT',
       body: JSON.stringify({ fields: { description: textToAdf(description) } }),
+    })
+    if (!response.ok) throw await mapHttpErrorResponse(response)
+  }
+
+  async createItem(draft: WorkItemDraft): Promise<WorkItem> {
+    const projectKey = draft.container ?? this.projectKey
+    if (!projectKey) {
+      throw new OrchestratorError(
+        'createItem() requires a project key: set draft.container or configure projectKey',
+        'invalid-input',
+      )
+    }
+
+    const fields: Record<string, unknown> = {
+      project: { key: projectKey },
+      summary: draft.title,
+      issuetype: { name: draft.type ?? 'Task' },
+    }
+    if (draft.description !== undefined) fields.description = textToAdf(draft.description)
+    if (draft.labels?.length) fields.labels = [...draft.labels]
+    // Parenting is a create-time field (team-managed hierarchy); other
+    // relationship kinds become issue links after the item exists.
+    if (draft.relateTo?.kind === 'child-of') {
+      fields.parent = { key: draft.relateTo.targetExternalId }
+    }
+
+    const response = await this.rawFetch('/issue', {
+      method: 'POST',
+      body: JSON.stringify({ fields }),
+    })
+    if (!response.ok) throw await mapHttpErrorResponse(response)
+    const created = (await response.json()) as { key: string }
+
+    // The create response carries only id/key/self; re-fetch for the canonical item.
+    const item = await this.get(created.key)
+    if (draft.relateTo && draft.relateTo.kind !== 'child-of') {
+      await this.linkItems(item, draft.relateTo.kind, draft.relateTo.targetExternalId)
+    }
+    return item
+  }
+
+  async linkItems(
+    from: WorkItem,
+    kind: WorkRelationshipKind,
+    targetExternalId: string,
+  ): Promise<void> {
+    if (kind === 'child-of' || kind === 'parent-of') {
+      const childKey = kind === 'child-of' ? from.externalId : targetExternalId
+      const parentKey = kind === 'child-of' ? targetExternalId : from.externalId
+      const response = await this.rawFetch(`/issue/${encodeURIComponent(childKey)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ fields: { parent: { key: parentKey } } }),
+      })
+      if (!response.ok) throw await mapHttpErrorResponse(response)
+      return
+    }
+
+    const typeName = LINK_TYPE_NAMES[kind]
+    if (!typeName) {
+      throw new OrchestratorError(`unsupported relationship kind: ${kind}`, 'invalid-input')
+    }
+    // The outward issue is the actor of the outward description ("blocks",
+    // "duplicates"); 'blocked-by' is the same Blocks link with roles swapped.
+    const outwardKey = kind === 'blocked-by' ? targetExternalId : from.externalId
+    const inwardKey = kind === 'blocked-by' ? from.externalId : targetExternalId
+    const response = await this.rawFetch('/issueLink', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: { name: typeName },
+        outwardIssue: { key: outwardKey },
+        inwardIssue: { key: inwardKey },
+      }),
     })
     if (!response.ok) throw await mapHttpErrorResponse(response)
   }
