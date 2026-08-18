@@ -85,6 +85,53 @@ export const agentRoleSchema = z
   })
   .strict()
 
+const mappingConditionSchema = z
+  .object({
+    field: z.string().min(1),
+    operator: z.enum(['equals', 'in', 'contains', 'regex']),
+    value: z.union([z.string(), z.array(z.string())]),
+  })
+  .strict()
+
+/** Recursive predicate mirroring @overture/core MappingPredicate. */
+export type MappingPredicateConfig =
+  | { readonly all: readonly MappingPredicateConfig[] }
+  | { readonly any: readonly MappingPredicateConfig[] }
+  | { readonly not: MappingPredicateConfig }
+  | { readonly condition: z.infer<typeof mappingConditionSchema> }
+
+const mappingPredicateSchema: z.ZodType<MappingPredicateConfig> = z.lazy(() =>
+  z.union([
+    z.object({ all: z.array(mappingPredicateSchema) }).strict(),
+    z.object({ any: z.array(mappingPredicateSchema) }).strict(),
+    z.object({ not: mappingPredicateSchema }).strict(),
+    z.object({ condition: mappingConditionSchema }).strict(),
+  ]),
+)
+
+export const mappingRuleSchema = z
+  .object({
+    id: z.string().min(1),
+    priority: z.number().int().default(0),
+    when: mappingPredicateSchema,
+    repositories: z
+      .array(
+        z
+          .object({
+            locator: z.string().min(1),
+            role: z
+              .enum(['primary', 'frontend', 'backend', 'infra', 'docs', 'dependency'])
+              .default('primary'),
+            defaultBranch: z.string().optional(),
+            scmProviderId: z.string().optional(),
+          })
+          .strict(),
+      )
+      .min(1),
+    onConflict: z.enum(['replace', 'merge']).optional(),
+  })
+  .strict()
+
 export const overtureConfigSchema = z
   .object({
     providers: z.record(z.string(), providerConfigSchema).default({}),
@@ -135,6 +182,11 @@ export const overtureConfigSchema = z
       .strict()
       .default({ paths: [] }),
     agents: z.record(z.string(), agentRoleSchema).default({}),
+    /** Work-item → repository mapping rules (many-to-many, priority order). */
+    mapping: z
+      .object({ rules: z.array(mappingRuleSchema).default([]) })
+      .strict()
+      .default({ rules: [] }),
     orchestrator: z
       .object({
         maxConcurrentRuns: z.number().int().positive().default(2),
