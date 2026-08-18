@@ -16,6 +16,9 @@
     },
     {
       "path": "../experiments"
+    },
+    {
+      "path": "../resolution"
     }
   ],
   "include": ["src"],

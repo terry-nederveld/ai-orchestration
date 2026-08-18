@@ -292,6 +292,9 @@ importers:
       '@overture/persistence':
         specifier: workspace:*
         version: link:../persistence
+      '@overture/resolution':
+        specifier: workspace:*
+        version: link:../resolution
       '@overture/testkit':
         specifier: workspace:*
         version: link:../testkit
@@ -591,9 +594,15 @@ importers:
         specifier: workspace:*
         version: link:../core
     devDependencies:
+      '@overture/orchestrator':
+        specifier: workspace:*
+        version: link:../orchestrator
       '@overture/persistence':
         specifier: workspace:*
         version: link:../persistence
+      '@overture/testkit':
+        specifier: workspace:*
+        version: link:../testkit
       typescript:
         specifier: ^5.9.2
         version: 5.9.3

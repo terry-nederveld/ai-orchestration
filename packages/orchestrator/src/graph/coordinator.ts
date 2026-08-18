@@ -23,6 +23,7 @@ import type {
   RunGraphState,
   RunId,
   RunState as RunStateType,
+  SourceControlProvider,
   WaitCondition,
   WaitSatisfaction,
   WorkflowGraph,
@@ -84,6 +85,7 @@ export interface GraphCoordinatorOptions {
   readonly commands: CommandRunner
   readonly actions: WorkflowActionRegistry
   readonly specBuilder: SpecBuilder
+  readonly scm?: SourceControlProvider
   readonly checkpoints?: CheckpointSelector
   /**
    * Built per run so the stepper's agents execute through the run's own
@@ -406,6 +408,7 @@ export class GraphRunCoordinator {
           run,
           workItem: item,
           ...(workspace ? { workspace, branch: workspace.branch ?? '' } : {}),
+          ...(this.options.scm ? { scm: this.options.scm } : {}),
           work: work as WorkProvider,
           events: this.options.events,
           clock: this.options.clock,

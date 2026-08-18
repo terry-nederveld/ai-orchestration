@@ -128,6 +128,24 @@ function resolvedToFragment(resolved: ResolvedProfile): ProfileFragment {
   }
 }
 
+/** The expression scope shared by action args, sub-workflow inputs, and fan-out items. */
+function runScope(context: NodeExecutionContext): {
+  vars: Readonly<Record<string, unknown>>
+  domain: Readonly<Record<string, unknown>>
+  results: Record<string, unknown>
+} {
+  return {
+    vars: context.variables,
+    domain: context.domain.data,
+    results: Object.fromEntries(
+      Object.entries(context.nodeResults).map(([key, result]) => [
+        key,
+        { status: result.status, outputs: result.outputs },
+      ]),
+    ),
+  }
+}
+
 /** Extract a JSON object from an agent's final summary. */
 export function parseStructuredOutputs(
   summary: string,
@@ -368,16 +386,7 @@ export function createGraphNodeExecutors(deps: GraphExecutorDeps): GraphNodeExec
     // '$expr:' prefixed string arguments evaluate against the run scope —
     // an explicit, deterministic opt-in (never shell-interpolated).
     const args: Record<string, unknown> = {}
-    const argScope = {
-      vars: context.variables,
-      domain: context.domain.data,
-      results: Object.fromEntries(
-        Object.entries(context.nodeResults).map(([key, result]) => [
-          key,
-          { status: result.status, outputs: result.outputs },
-        ]),
-      ),
-    }
+    const argScope = runScope(context)
     for (const [key, value] of Object.entries(node.config.with ?? {})) {
       args[key] =
         typeof value === 'string' && value.startsWith('$expr:')
@@ -463,11 +472,7 @@ export function createGraphNodeExecutors(deps: GraphExecutorDeps): GraphNodeExec
     }
     const variables: Record<string, unknown> = {}
     for (const [key, expression] of Object.entries(node.config.inputs ?? {})) {
-      variables[key] = evaluateScopeValue(expression, {
-        vars: context.variables,
-        domain: context.domain.data,
-        results: {},
-      })
+      variables[key] = evaluateScopeValue(expression, runScope(context))
     }
     const { childRunId } = await deps.childRunner.start({
       parentRunId: String(deps.run.id),
@@ -491,11 +496,7 @@ export function createGraphNodeExecutors(deps: GraphExecutorDeps): GraphNodeExec
     if (context.satisfaction?.event) {
       return childCompletionResult(context.satisfaction.event)
     }
-    const items = evaluateScopeValue(node.config.items, {
-      vars: context.variables,
-      domain: context.domain.data,
-      results: {},
-    })
+    const items = evaluateScopeValue(node.config.items, runScope(context))
     if (!Array.isArray(items)) {
       return {
         type: 'result',
@@ -506,14 +507,28 @@ export function createGraphNodeExecutors(deps: GraphExecutorDeps): GraphNodeExec
     if (items.length === 0) {
       return { type: 'result', status: 'succeeded', outputs: { branches: [] } }
     }
+    // The branch workflow runs at the version pinned into the snapshot.
+    const branchDefinition = findInSnapshot(
+      deps.snapshot,
+      DefinitionKind.Workflow,
+      node.config.workflow.name,
+      node.config.workflow.version,
+    )
+    if (!branchDefinition) {
+      return {
+        type: 'result',
+        status: 'failed',
+        error: `fan-out workflow '${node.config.workflow.name}' not in snapshot`,
+      }
+    }
     const childRunIds: string[] = []
     for (const [index, item] of items.entries()) {
       const { childRunId } = await deps.childRunner.start({
         parentRunId: String(deps.run.id),
         nodeId: node.id,
         branchKey: String(index),
-        workflowName: node.config.workflow.name,
-        workflowVersion: node.config.workflow.version ?? 0,
+        workflowName: branchDefinition.name,
+        workflowVersion: branchDefinition.version,
         variables: { item, branch: index },
       })
       childRunIds.push(childRunId)

@@ -38,6 +38,11 @@ export class ProfileAgentRouter implements AgentRouter {
     this.executors.set(registration.id, registration)
   }
 
+  /** Direct lookup by executor id, for the graph runtime's ExecutorResolver. */
+  getExecutor(id: string): ResolvedAgentExecutor['start'] | undefined {
+    return this.executors.get(id)?.start
+  }
+
   async resolve(step: AgentStep): Promise<ResolvedAgentExecutor> {
     const profileName = step.route ?? step.agent
     const profile =
