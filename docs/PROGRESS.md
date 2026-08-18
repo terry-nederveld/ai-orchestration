@@ -79,15 +79,30 @@ run UX, and the workflow designer. v1 delivery report: docs/DELIVERY.md.
   green end-to-end through the coordinator with scripted executors,
   including coordinator destruction between suspension and resume.
   ADRs 0017–0020.
-- In flight (agents): graph scheduler (lanes, cron, ambiguous routing +
-  approval-gated rule suggestions), server/CLI control-plane endpoints
-  (waits, definitions, graph-run views), side-effect-free Evaluate,
+- Also committed since: graph scheduler (lanes, cron with no
+  double-fire, ambiguous routing + approval-gated rule suggestions) and
+  its daemon-tick wiring (lane dispatch from source backlogs in native
+  rank order, WORKFLOW_SELECTION_REQUIRED responses routed to the
+  scheduler's selection path); server/CLI control-plane endpoints
+  (waits list/respond, definitions CRUD + lifecycle, graph-run views,
+  validate, evaluate, judgments); side-effect-free Evaluate with
+  recording-proxy zero-write proof; daemon assembly wiring for the
+  graph runtime (coordinator, checkpoint selector, spec builder,
+  experiments, template install-on-boot that never supersedes operator
+  edits) verified by live boot; engine implicit-join fix (mid-graph
+  loop re-entry through a different inbound edge — found by docs
+  verification, covered by new engine tests); release lifecycle model +
+  weekly-support-loop and release-verification examples; desktop
+  federation (N named local/remote runtimes, client-side aggregation,
+  stale degradation), work-centric newest-first activity surface with
+  needs-you badges and typed wait response forms (judgment packages
+  with candidate-labeled choices), graph-run detail, judgment
+  observability, and the workflow designer (SVG canvas + YAML
+  round-trip over one canonical document + Evaluate panel); docs
+  refresh (durable-workflows.md reference + four updated pages);
   ADRs 0021–0026.
-- Next: daemon assembly wiring for the graph runtime (coordinator,
-  checkpoint selector, spec builder, experiments, template install),
-  desktop federation + work-centric newest-first UX + designer,
-  release lifecycle + recurring weekly-support-loop example,
-  independent architecture + security reviews, final validation (§40).
+- In flight: independent architecture + security reviews, §40 clean
+  checkout validation, final report.
 
 ## Completed Milestones
 
