@@ -210,18 +210,28 @@ export function validateCompatibility(
 }
 
 /**
- * Install (or refresh) templates into the definition store. Documents are
- * content-addressed, so reinstalling unchanged templates mints no new
- * versions. Newly created definitions start DRAFT unless `enable` is set.
+ * Install templates into the definition store. A definition that already
+ * exists is left untouched — an operator's in-place edits (or an earlier
+ * install) are never superseded by a boot-time reinstall; fork a template
+ * under your own name for divergent workflows, or pass `refresh: true` to
+ * deliberately mint pristine template versions over existing ones
+ * (history is preserved either way — versions are append-only). Newly
+ * created definitions start DRAFT unless `enable` is set.
  */
 export async function installTemplates(
   store: DefinitionStore,
-  options: { readonly enable?: boolean; readonly only?: readonly string[] } = {},
+  options: {
+    readonly enable?: boolean
+    readonly only?: readonly string[]
+    readonly refresh?: boolean
+  } = {},
 ): Promise<ReadonlyArray<{ name: string; kind: DefinitionKind; version: number }>> {
   const installed: Array<{ name: string; kind: DefinitionKind; version: number }> = []
   for (const template of templates) {
     if (options.only && !options.only.includes(template.name)) continue
     for (const definition of template.definitions) {
+      const existing = await store.get(definition.kind, definition.name)
+      if (existing && !options.refresh) continue
       const saved = await store.save(definition.kind, definition.name, definition.document)
       if (options.enable) {
         await store.setLifecycle(definition.kind, definition.name, 'enabled')

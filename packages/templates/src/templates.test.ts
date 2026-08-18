@@ -56,15 +56,15 @@ describe('flagship templates', () => {
     expect(stop?.condition).toContain('stop_after')
   })
 
-  it('installs templates idempotently through content addressing', async () => {
+  it('installs templates idempotently and never supersedes operator edits', async () => {
     const persistence = new InMemoryPersistenceProvider()
     const first = await installTemplates(persistence.definitions, { enable: true })
     expect(first.length).toBeGreaterThan(0)
     expect(first.every((entry) => entry.version === 1)).toBe(true)
 
+    // Reinstall over an untouched store: nothing minted, nothing changed.
     const second = await installTemplates(persistence.definitions)
-    expect(second.every((entry) => entry.version === 1)).toBe(true)
-
+    expect(second).toEqual([])
     const workflow = await persistence.definitions.get(
       DefinitionKind.Workflow,
       'autonomous-delivery',
@@ -73,6 +73,27 @@ describe('flagship templates', () => {
     expect(
       await persistence.definitions.getLifecycle(DefinitionKind.Workflow, 'autonomous-delivery'),
     ).toBe('enabled')
+
+    // An operator edit stays authoritative across reinstalls (boot-time
+    // install must not mint a pristine version over it).
+    const edited = { ...(workflow?.document ?? {}), description: 'operator tuned' }
+    await persistence.definitions.save(DefinitionKind.Workflow, 'autonomous-delivery', edited)
+    await installTemplates(persistence.definitions)
+    const latest = await persistence.definitions.get(DefinitionKind.Workflow, 'autonomous-delivery')
+    expect(latest?.version).toBe(2)
+    expect((latest?.document as { description?: string }).description).toBe('operator tuned')
+
+    // refresh: true deliberately mints the pristine template again.
+    const refreshed = await installTemplates(persistence.definitions, {
+      only: ['autonomous-delivery'],
+      refresh: true,
+    })
+    expect(refreshed.some((entry) => entry.name === 'autonomous-delivery')).toBe(true)
+    const afterRefresh = await persistence.definitions.get(
+      DefinitionKind.Workflow,
+      'autonomous-delivery',
+    )
+    expect(afterRefresh?.version).toBe(3)
   })
 
   it('validates template compatibility against available capabilities', () => {
