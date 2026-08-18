@@ -5,6 +5,7 @@
  */
 
 import {
+  asId,
   type ClaimResult,
   OrchestratorError,
   type ProviderAvailability,
@@ -12,8 +13,10 @@ import {
   type WorkClaim,
   type WorkComment,
   type WorkItem,
+  type WorkItemDraft,
   type WorkProvider,
   type WorkQuery,
+  type WorkRelationshipKind,
   type WorkStateInfo,
   type WorkTransition,
 } from '@overture/core'
@@ -32,6 +35,13 @@ export type WorkProviderCall =
   | { readonly op: 'transition'; readonly item: WorkItem; readonly transition: WorkTransition }
   | { readonly op: 'getDescription'; readonly item: WorkItem }
   | { readonly op: 'updateDescription'; readonly item: WorkItem; readonly description: string }
+  | { readonly op: 'createItem'; readonly draft: WorkItemDraft }
+  | {
+      readonly op: 'linkItems'
+      readonly item: WorkItem
+      readonly kind: WorkRelationshipKind
+      readonly targetExternalId: string
+    }
 
 export interface FakeWorkProviderOptions {
   readonly info?: Partial<ProviderInfo>
@@ -55,6 +65,7 @@ export class FakeWorkProvider implements WorkProvider {
   private readonly claims = new Map<string, WorkClaim>()
   private readonly states: readonly WorkStateInfo[]
   private readonly nonClaimableStates: ReadonlySet<string>
+  private createSeq = 0
 
   constructor(seed: readonly WorkItem[] = [], options: FakeWorkProviderOptions = {}) {
     this.info = {
@@ -167,5 +178,45 @@ export class FakeWorkProvider implements WorkProvider {
     }
     this.items.set(item.id, { ...stored, description })
     this.calls.push({ op: 'updateDescription', item, description })
+  }
+
+  async createItem(draft: WorkItemDraft): Promise<WorkItem> {
+    this.createSeq += 1
+    const externalId = `NEW-${this.createSeq}`
+    const item: WorkItem = {
+      id: asId(`${this.info.id}:${externalId}`),
+      provider: this.info.id,
+      externalId,
+      title: draft.title,
+      ...(draft.description !== undefined ? { description: draft.description } : {}),
+      state: this.states[0]?.id ?? 'todo',
+      ...(draft.type !== undefined ? { type: draft.type } : {}),
+      labels: draft.labels ?? [],
+      assignees: [],
+      relationships: draft.relateTo
+        ? [{ kind: draft.relateTo.kind, targetExternalId: draft.relateTo.targetExternalId }]
+        : [],
+      ...(draft.container !== undefined ? { repository: { locator: draft.container } } : {}),
+      metadata: {},
+    }
+    this.items.set(item.id, item)
+    this.calls.push({ op: 'createItem', draft })
+    return item
+  }
+
+  async linkItems(
+    from: WorkItem,
+    kind: WorkRelationshipKind,
+    targetExternalId: string,
+  ): Promise<void> {
+    const stored = this.items.get(from.id)
+    if (!stored) {
+      throw new OrchestratorError(`work item not found: ${from.id}`, 'invalid-input')
+    }
+    this.items.set(from.id, {
+      ...stored,
+      relationships: [...stored.relationships, { kind, targetExternalId }],
+    })
+    this.calls.push({ op: 'linkItems', item: from, kind, targetExternalId })
   }
 }

@@ -59,6 +59,15 @@ export const ISSUE_DESCRIPTION_QUERY = `
   }
 `
 
+/** Internal-id lookup for mutations that need another issue's id (parenting, relations). */
+export const ISSUE_ID_QUERY = `
+  query IssueId($id: String!) {
+    issue(id: $id) {
+      id
+    }
+  }
+`
+
 /** Authoritative snapshot for claim()/release(): current claim label and the latest marker comment. */
 export const ISSUE_CLAIM_STATE_QUERY = `
   query IssueClaimState($id: String!) {
@@ -101,6 +110,25 @@ export const ISSUE_UPDATE_MUTATION = `
         state { name type }
         labels { nodes { id name } }
       }
+    }
+  }
+`
+
+export const ISSUE_CREATE_MUTATION = `
+  mutation IssueCreate($input: IssueCreateInput!) {
+    issueCreate(input: $input) {
+      success
+      issue {
+        ${ISSUE_FIELDS}
+      }
+    }
+  }
+`
+
+export const ISSUE_RELATION_CREATE_MUTATION = `
+  mutation IssueRelationCreate($input: IssueRelationCreateInput!) {
+    issueRelationCreate(input: $input) {
+      success
     }
   }
 `

@@ -22,8 +22,10 @@ import {
   type WorkClaim,
   type WorkComment,
   type WorkItem,
+  type WorkItemDraft,
   type WorkProvider,
   type WorkQuery,
+  type WorkRelationshipKind,
   type WorkStateInfo,
   type WorkTransition,
 } from '@overture/core'
@@ -46,9 +48,12 @@ import {
   buildIssueFilter,
   COMMENT_CREATE_MUTATION,
   ISSUE_CLAIM_STATE_QUERY,
+  ISSUE_CREATE_MUTATION,
   ISSUE_DESCRIPTION_QUERY,
   ISSUE_GET_QUERY,
+  ISSUE_ID_QUERY,
   ISSUE_LABEL_CREATE_MUTATION,
+  ISSUE_RELATION_CREATE_MUTATION,
   ISSUE_UPDATE_MUTATION,
   ISSUES_QUERY,
   TEAM_QUERY,
@@ -239,6 +244,79 @@ export class LinearWorkProvider implements WorkProvider {
     await this.request(ISSUE_UPDATE_MUTATION, { id: linearId, input: { description } })
   }
 
+  /**
+   * `draft.type` is ignored: Linear has no issue types. A 'child-of' relateTo
+   * becomes the created issue's parentId; every other kind becomes an issue
+   * relation created right after the issue exists.
+   */
+  async createItem(draft: WorkItemDraft): Promise<WorkItem> {
+    const teamKey = draft.container ?? this.defaultTeamKey
+    if (!teamKey) {
+      throw new OrchestratorError(
+        'createItem() requires a team key: set draft.container or configure teamKey',
+        'invalid-input',
+      )
+    }
+    const team = await this.fetchTeam(teamKey)
+
+    const input: Record<string, unknown> = { teamId: team.id, title: draft.title }
+    if (draft.description !== undefined) input.description = draft.description
+    if (draft.labels?.length) {
+      const labelIds: string[] = []
+      for (const name of draft.labels) {
+        labelIds.push((await this.findOrCreateLabel(team, name)).id)
+      }
+      input.labelIds = labelIds
+    }
+    if (draft.relateTo?.kind === 'child-of') {
+      input.parentId = await this.resolveInternalId(draft.relateTo.targetExternalId)
+    }
+
+    const data = await this.request<{ issueCreate: { issue: LinearIssue | null } }>(
+      ISSUE_CREATE_MUTATION,
+      { input },
+    )
+    const issue = data.issueCreate.issue
+    if (!issue) {
+      throw new OrchestratorError('issueCreate returned no issue', 'corrupt-response')
+    }
+    const item = mapIssueToWorkItem(issue)
+    if (draft.relateTo && draft.relateTo.kind !== 'child-of') {
+      await this.linkItems(item, draft.relateTo.kind, draft.relateTo.targetExternalId)
+    }
+    return item
+  }
+
+  async linkItems(
+    from: WorkItem,
+    kind: WorkRelationshipKind,
+    targetExternalId: string,
+  ): Promise<void> {
+    const fromId = this.resolveLinearId(from)
+    const targetId = await this.resolveInternalId(targetExternalId)
+
+    switch (kind) {
+      case 'child-of':
+        await this.request(ISSUE_UPDATE_MUTATION, { id: fromId, input: { parentId: targetId } })
+        return
+      case 'parent-of':
+        await this.request(ISSUE_UPDATE_MUTATION, { id: targetId, input: { parentId: fromId } })
+        return
+      case 'blocks':
+        await this.createRelation(fromId, targetId, 'blocks')
+        return
+      case 'blocked-by':
+        await this.createRelation(targetId, fromId, 'blocks')
+        return
+      case 'duplicates':
+        await this.createRelation(fromId, targetId, 'duplicate')
+        return
+      default:
+        await this.createRelation(fromId, targetId, 'related')
+        return
+    }
+  }
+
   async listStates(container?: string): Promise<readonly WorkStateInfo[]> {
     const teamKey = container ?? this.defaultTeamKey
     if (!teamKey) {
@@ -298,13 +376,39 @@ export class LinearWorkProvider implements WorkProvider {
   }
 
   private async findOrCreateClaimLabel(team: LinearTeam): Promise<LinearLabel> {
-    const existing = team.labels.nodes.find((label) => label.name === this.claimLabelName)
+    return this.findOrCreateLabel(team, this.claimLabelName)
+  }
+
+  private async findOrCreateLabel(team: LinearTeam, name: string): Promise<LinearLabel> {
+    const existing = team.labels.nodes.find((label) => label.name === name)
     if (existing) return existing
     const data = await this.request<{ issueLabelCreate: { issueLabel: LinearLabel } }>(
       ISSUE_LABEL_CREATE_MUTATION,
-      { input: { name: this.claimLabelName, teamId: team.id } },
+      { input: { name, teamId: team.id } },
     )
     return data.issueLabelCreate.issueLabel
+  }
+
+  /** Resolves an issue identifier (e.g. `ENG-42`) to Linear's internal issue id. */
+  private async resolveInternalId(externalId: string): Promise<string> {
+    const data = await this.request<{ issue: { id: string } | null }>(ISSUE_ID_QUERY, {
+      id: externalId,
+    })
+    if (!data.issue) {
+      throw new OrchestratorError(`Linear issue not found: ${externalId}`, 'invalid-input')
+    }
+    return data.issue.id
+  }
+
+  /** `issueId` carries the relation's action toward `relatedIssueId` (blocks/duplicate/related). */
+  private async createRelation(
+    issueId: string,
+    relatedIssueId: string,
+    type: 'blocks' | 'duplicate' | 'related',
+  ): Promise<void> {
+    await this.request(ISSUE_RELATION_CREATE_MUTATION, {
+      input: { issueId, relatedIssueId, type },
+    })
   }
 
   private async request<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
