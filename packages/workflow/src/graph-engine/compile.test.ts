@@ -181,9 +181,13 @@ describe('compileWorkflow structure', () => {
     })
   })
 
-  it('leaves ${{ }} interpolation in carried fields untranslated for executors', () => {
+  it('carries ${{ }} placeholders through as literal text (graph executors do not resolve them)', () => {
     const graph = compile(getBuiltinSoftwareDevelopmentWorkflow())
     const deliver = graph.nodes.find((node) => node.id === 'deliver')
+    // The placeholder is preserved verbatim: the compiler never translates
+    // it, and the graph command/action executors do not interpolate it —
+    // any future interpolation must go through env-var indirection, never a
+    // naive splice into a shell argument (ADR-0016).
     expect(deliver?.config).toMatchObject({
       kind: 'action',
       action: 'source_control.pull_request',

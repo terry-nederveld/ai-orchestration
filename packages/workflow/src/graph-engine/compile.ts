@@ -34,8 +34,16 @@
  *   skipped-and-tainted".
  *
  * `${{ … }}` interpolation inside goals/commands/`with`/env/cwd/approval
- * descriptions is deliberately left as untranslated text: interpolation is
- * resolved by node executors at execution time, not by the compiler.
+ * descriptions is carried through as literal text: the compiler does not
+ * translate it. NOTE: the graph node executors do NOT currently resolve
+ * `${{ … }}` either — a compiled v1 workflow that relied on interpolation
+ * runs with the placeholder unresolved. This is a known functional gap,
+ * NOT a green light to add interpolation into the command/gate path: v1's
+ * shell-command interpolation goes through env-var indirection
+ * (`interpolateForShell`, ADR-0016) precisely so attacker-controlled work
+ * item text never lands in a shell argument. Any future interpolation on
+ * the graph command/gate path MUST reuse that indirection, never a naive
+ * string splice.
  *
  * v1 `transitions.success`/`failure`/`blocked` targets are NOT compiled:
  * they are projections of the run outcome onto the external work item,

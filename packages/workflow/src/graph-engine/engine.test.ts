@@ -645,7 +645,7 @@ describe('GraphEngine satisfaction consumption and retry accounting', () => {
     })
     expect(first.status).toBe('waiting')
     expect(first.newWaits).toHaveLength(1)
-    expect(first.newWaits[0]?.spec.parameters['gate']).toBe('g1')
+    expect(first.newWaits[0]?.spec.parameters.gate).toBe('g1')
     expect(invocations).toBe(1)
 
     // Satisfy the first wait: the node re-executes ONCE, consumes the
@@ -659,7 +659,7 @@ describe('GraphEngine satisfaction consumption and retry accounting', () => {
     })
     expect(second.status).toBe('waiting')
     expect(second.newWaits).toHaveLength(1)
-    expect(second.newWaits[0]?.spec.parameters['gate']).toBe('g2')
+    expect(second.newWaits[0]?.spec.parameters.gate).toBe('g2')
     expect(invocations).toBe(2)
 
     const third = await engine.tick({
