@@ -11,6 +11,7 @@ import { loadConfig, type OvertureConfig } from '@overture/config'
 import {
   type AgentProvider,
   type Clock,
+  DefinitionKind,
   type IdGenerator,
   InMemoryEventBus,
   type Logger,
@@ -53,7 +54,8 @@ export interface AssembledDaemon {
   readonly secrets: SecretProvider
   /**
    * Durable graph runtime periodic work: recover interrupted runs once,
-   * then fire due schedule and wait timers each poll interval.
+   * then each poll interval fire due wait timers and schedules and
+   * dispatch enabled backlog lanes.
    */
   readonly graphTick: () => Promise<void>
   readonly graphRecover: () => Promise<void>
@@ -615,6 +617,63 @@ export async function assembleDaemon(options: {
     logger: logger.child({ component: 'graph-scheduler' }),
   })
 
+  // Routing-selection waits live under a synthetic `routing:` run, so they
+  // resolve through the scheduler; every other wait resumes its run through
+  // the graph coordinator.
+  const graphWaits = {
+    satisfy: async (
+      waitId: string,
+      response: {
+        readonly responder: string
+        readonly channel: 'app' | 'work_item'
+        readonly value?: unknown
+        readonly event?: Readonly<Record<string, unknown>>
+      },
+    ): Promise<{ readonly accepted: boolean; readonly reason?: string }> => {
+      const condition = await persistence.waits.get(waitId)
+      if (condition?.parameters['reason'] === 'WORKFLOW_SELECTION_REQUIRED') {
+        const outcome = await graphScheduler.onSelection(waitId, {
+          workflow: String(response.value ?? ''),
+          responder: response.responder,
+        })
+        return {
+          accepted: outcome.accepted,
+          ...(outcome.reason !== undefined ? { reason: outcome.reason } : {}),
+        }
+      }
+      return graphCoordinator.satisfy(waitId, response)
+    },
+  }
+
+  const dispatchLanes = async (): Promise<void> => {
+    const statuses = await persistence.definitions.list(DefinitionKind.Lane)
+    for (const status of statuses) {
+      if (status.lifecycle !== 'enabled') continue
+      const version = await persistence.definitions.get(DefinitionKind.Lane, status.name)
+      const lane = version?.document as unknown as import('@overture/core').LaneDefinition
+      if (!lane?.enabled) continue
+      const provider = workProviders.get(lane.source)
+      if (!provider) {
+        logger.warn('lane references unknown work source', {
+          lane: lane.name,
+          source: lane.source,
+        })
+        continue
+      }
+      // Provider discovery order is the backlog's native rank — preserved.
+      const candidates = await provider
+        .discover((lane.query ?? {}) as import('@overture/core').WorkQuery)
+        .catch((error) => {
+          logger.warn('lane discovery failed', {
+            lane: lane.name,
+            error: error instanceof Error ? error.message : String(error),
+          })
+          return [] as const
+        })
+      if (candidates.length > 0) await graphScheduler.dispatchLane(lane, candidates)
+    }
+  }
+
   const service = new OvertureService({
     version: VERSION,
     redactEvent: (event) => redactor.redactObject(event),
@@ -623,7 +682,8 @@ export async function assembleDaemon(options: {
     events,
     scheduler,
     coordinator,
-    graphCoordinator,
+    graphCoordinator: graphWaits,
+    evaluateExecutors: { has: (id) => router.getExecutor(id) !== undefined },
     workflows,
     workProviders,
     modelProviders,
@@ -642,6 +702,7 @@ export async function assembleDaemon(options: {
     graphTick: async () => {
       await graphCoordinator.fireDueTimers(clock.now())
       await graphScheduler.fireDueSchedules(clock.now())
+      await dispatchLanes()
     },
   }
 }
