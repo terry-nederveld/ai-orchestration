@@ -438,12 +438,25 @@ function joinSatisfied(
   entryNodeId: string,
 ): boolean {
   const inbound = incoming.get(node.id) ?? []
-  const mode = node.join?.mode ?? 'any'
+  const mode = node.join?.mode
   // The entry node's initial activation happens without a transition
   // firing; exclude it from join accounting so loops back to the entry
   // (and self-loops on it) still re-activate correctly.
   const entryOffset = node.id === entryNodeId ? 1 : 0
   const activations = (mutable.activations[node.id] ?? 0) - entryOffset
+  if (mode === undefined) {
+    // Implicit join: one execution per inbound firing. Nodes reached
+    // through alternative edges (exclusive conditions, loop re-entries
+    // via different transitions) re-activate on every arrival — this is
+    // what lets a bounded loop re-enter through a different edge than the
+    // one that first reached the node. Parallel branches converging on a
+    // node should declare an explicit join to coalesce instead.
+    const totalFirings = inbound.reduce(
+      (sum, transition) => sum + (mutable.loopCounters[transition.id] ?? 0),
+      0,
+    )
+    return totalFirings > activations
+  }
   const firedCount = inbound.filter(
     (transition) => (mutable.loopCounters[transition.id] ?? 0) > 0,
   ).length
@@ -453,9 +466,9 @@ function joinSatisfied(
   )
   switch (mode) {
     case 'any':
-      // One activation per arrival round: a two-branch diamond activates
-      // once, while a loop transition firing again re-activates. Entry
-      // nodes (no inbound) only ever activate via the explicit entry path.
+      // One activation per arrival wave: a two-branch diamond activates
+      // once (later same-wave arrivals are absorbed), while a loop
+      // transition firing again re-activates.
       return maxSingleFirings > activations
     case 'all':
       return firedCount === inbound.length && activations === 0

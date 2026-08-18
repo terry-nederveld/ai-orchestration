@@ -549,3 +549,67 @@ describe('GraphEngine effects, guards, and lifecycle', () => {
     expect(outcome.error).toContain('backstop')
   })
 })
+
+describe('GraphEngine implicit-join loop re-entry', () => {
+  const succeeded = (outputs: Record<string, unknown>): NodeYield => ({
+    type: 'result',
+    status: 'succeeded',
+    outputs,
+  })
+
+  it('re-enters a mid-graph loop through a different inbound edge (remediation shape)', async () => {
+    const g = graph(
+      [agent('review'), agent('remediate'), agent('re_review'), terminal('done')],
+      [
+        t('review-ok', 'review', 'done', { condition: 'outputs.approved == true' }),
+        t('review-remediate', 'review', 'remediate', {
+          condition: 'outputs.approved == false',
+          loopBound: 2,
+        }),
+        t('rem-rereview', 'remediate', 're_review', {
+          condition: "node.status == 'succeeded'",
+          loopBound: 2,
+        }),
+        t('rereview-ok', 're_review', 'done', { condition: 'outputs.approved == true' }),
+        t('rereview-again', 're_review', 'remediate', {
+          condition: 'outputs.approved == false',
+          loopBound: 1,
+        }),
+      ],
+      'review',
+    )
+    const { executors, calls } = scripted({
+      review: succeeded({ approved: false }),
+      re_review: [succeeded({ approved: false }), succeeded({ approved: true })],
+    })
+    const outcome = await run(g, executors)
+    // The second remediation round must actually execute: remediate is
+    // reached once via review-remediate and once via rereview-again — two
+    // different inbound edges, one firing each.
+    expect(outcome.status).toBe('completed')
+    expect(calls.remediate).toBe(2)
+    expect(calls.re_review).toBe(2)
+  })
+
+  it('re-activates a non-entry self-loop until its condition clears', async () => {
+    const g = graph(
+      [agent('a'), agent('poll'), terminal('done')],
+      [
+        t('a-poll', 'a', 'poll'),
+        t('poll-again', 'poll', 'poll', { condition: 'outputs.more == true', loopBound: 2 }),
+        t('poll-done', 'poll', 'done', { condition: 'outputs.more == false' }),
+      ],
+      'a',
+    )
+    const { executors, calls } = scripted({
+      poll: [
+        { type: 'result', status: 'succeeded', outputs: { more: true } },
+        { type: 'result', status: 'succeeded', outputs: { more: true } },
+        { type: 'result', status: 'succeeded', outputs: { more: false } },
+      ],
+    })
+    const outcome = await run(g, executors)
+    expect(outcome.status).toBe('completed')
+    expect(calls.poll).toBe(3)
+  })
+})
