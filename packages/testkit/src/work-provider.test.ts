@@ -109,3 +109,78 @@ describe('FakeWorkProvider', () => {
     })
   })
 })
+
+describe('FakeWorkProvider creation and linking', () => {
+  it('createItem() seeds a retrievable item with sequential NEW-<n> ids and records the call', async () => {
+    const provider = new FakeWorkProvider()
+    const first = await provider.createItem({ title: 'First', labels: ['bug'] })
+    const second = await provider.createItem({ title: 'Second' })
+
+    expect(first.id).toBe('fake-work:NEW-1')
+    expect(second.id).toBe('fake-work:NEW-2')
+    expect(first).toMatchObject({
+      provider: 'fake-work',
+      externalId: 'NEW-1',
+      title: 'First',
+      labels: ['bug'],
+      state: 'todo',
+    })
+    expect(await provider.get('NEW-1')).toEqual(first)
+    expect(provider.calls.filter((c) => c.op === 'createItem')).toHaveLength(2)
+  })
+
+  it('createItem() carries description, type, and container into the item', async () => {
+    const provider = new FakeWorkProvider()
+    const item = await provider.createItem({
+      title: 'Detailed',
+      description: 'body',
+      type: 'bug',
+      container: 'org/repo',
+    })
+    expect(item).toMatchObject({
+      description: 'body',
+      type: 'bug',
+      repository: { locator: 'org/repo' },
+    })
+    expect(await provider.get('NEW-1', 'org/repo')).toEqual(item)
+  })
+
+  it('createItem() materializes relateTo in the created item relationships', async () => {
+    const provider = new FakeWorkProvider()
+    provider.seed(makeWorkItem({ externalId: 'A-1' }))
+    const item = await provider.createItem({
+      title: 'Child',
+      relateTo: { kind: 'child-of', targetExternalId: 'A-1' },
+    })
+    expect(item.relationships).toEqual([{ kind: 'child-of', targetExternalId: 'A-1' }])
+    expect((await provider.get('NEW-1')).relationships).toEqual([
+      { kind: 'child-of', targetExternalId: 'A-1' },
+    ])
+  })
+
+  it('linkItems() appends a relationship to the stored item and records the call', async () => {
+    const provider = new FakeWorkProvider()
+    const item = makeWorkItem({ externalId: 'A-1' })
+    provider.seed(item)
+
+    await provider.linkItems(item, 'blocks', 'A-2')
+    await provider.linkItems(item, 'relates-to', 'A-3')
+
+    expect((await provider.get('A-1')).relationships).toEqual([
+      { kind: 'blocks', targetExternalId: 'A-2' },
+      { kind: 'relates-to', targetExternalId: 'A-3' },
+    ])
+    expect(provider.calls.filter((c) => c.op === 'linkItems')).toEqual([
+      { op: 'linkItems', item, kind: 'blocks', targetExternalId: 'A-2' },
+      { op: 'linkItems', item, kind: 'relates-to', targetExternalId: 'A-3' },
+    ])
+  })
+
+  it('linkItems() throws for an unknown item', async () => {
+    const provider = new FakeWorkProvider()
+    const unknown = makeWorkItem({ externalId: 'A-404' })
+    await expect(provider.linkItems(unknown, 'blocks', 'A-1')).rejects.toMatchObject({
+      category: 'invalid-input',
+    })
+  })
+})

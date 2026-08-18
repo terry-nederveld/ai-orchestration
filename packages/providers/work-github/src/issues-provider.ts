@@ -316,7 +316,11 @@ export class GitHubIssuesWorkProvider implements WorkProvider {
         }
       }
     }
-    await this.appendBodyReference(container, from.externalId, referenceLine(kind, targetExternalId))
+    await this.appendBodyReference(
+      container,
+      from.externalId,
+      referenceLine(kind, targetExternalId),
+    )
   }
 
   async listStates(_container?: string): Promise<readonly WorkStateInfo[]> {

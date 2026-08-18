@@ -152,6 +152,41 @@ class FakeLinearBackend {
       }
     }
 
+    if (query.includes('query IssueId')) {
+      const id = variables.id as string
+      const issue = this.issues.get(id) ?? this.findByInternalId(id)
+      return { data: { issue: issue ? { id: issue.id } : null } }
+    }
+
+    if (query.includes('mutation IssueCreate')) {
+      const input = variables.input as {
+        teamId: string
+        title: string
+        description?: string
+        labelIds?: string[]
+        parentId?: string
+      }
+      const n = this.issues.size + 1
+      const issue: FakeIssue = {
+        id: `internal-created-${n}`,
+        identifier: `${TEAM_KEY}-${100 + n}`,
+        title: input.title,
+        description: input.description ?? null,
+        stateName: 'Todo',
+        stateType: 'unstarted',
+        labelIds: input.labelIds ?? [],
+        assigneeId: null,
+        priority: 0,
+        comments: [],
+      }
+      this.addIssue(issue)
+      return { data: { issueCreate: { success: true, issue: this.toGraphIssue(issue) } } }
+    }
+
+    if (query.includes('mutation IssueRelationCreate')) {
+      return { data: { issueRelationCreate: { success: true } } }
+    }
+
     if (query.includes('mutation IssueLabelCreate')) {
       const input = variables.input as { name: string; teamId: string }
       const label = { id: `label-${this.labelSeq++}`, name: input.name }

@@ -1,4 +1,4 @@
-import { asId } from '@overture/core'
+import { asId, type WorkProvider } from '@overture/core'
 import { describe, expect, it } from 'vitest'
 import { GitHubProjectsWorkProvider } from './projects-provider.js'
 import { fakeFetch, jsonResponse, routedFetch, textErrorResponse } from './test-helpers.js'
@@ -458,3 +458,77 @@ function baseItem(externalId: string) {
     metadata: {},
   }
 }
+
+describe('GitHubProjectsWorkProvider.createItem', () => {
+  it('adds a draft item via addProjectV2DraftIssue and maps the returned project item', async () => {
+    const mutations: { query: string; variables: Record<string, unknown> }[] = []
+    const fetchImpl = routedFetch((_url, init) => {
+      const body = graphqlBody(init)
+      if (body.query.includes('field(name:')) {
+        return jsonResponse(200, {
+          data: {
+            organization: {
+              projectV2: {
+                id: 'project_1',
+                field: {
+                  id: 'field_1',
+                  name: 'Status',
+                  options: [{ id: 'opt_todo', name: 'Todo' }],
+                },
+              },
+            },
+          },
+        })
+      }
+      if (body.query.includes('addProjectV2DraftIssue')) {
+        mutations.push(body)
+        return jsonResponse(200, {
+          data: {
+            addProjectV2DraftIssue: {
+              projectItem: {
+                id: 'item_9',
+                fieldValues: { nodes: [] },
+                content: { __typename: 'DraftIssue', title: 'Draft idea', body: 'Body' },
+              },
+            },
+          },
+        })
+      }
+      throw new Error(`unexpected GraphQL query: ${body.query}`)
+    })
+    const provider = makeProvider(fetchImpl)
+    const item = await provider.createItem({ title: 'Draft idea', description: 'Body' })
+
+    expect(mutations).toHaveLength(1)
+    expect(mutations[0]?.variables).toEqual({
+      projectId: 'project_1',
+      title: 'Draft idea',
+      body: 'Body',
+    })
+    expect(item).toMatchObject({
+      externalId: 'item_9',
+      type: 'draft',
+      title: 'Draft idea',
+      description: 'Body',
+      state: 'no-status',
+    })
+  })
+
+  it('rejects relateTo since drafts have no underlying issue to link', async () => {
+    const fetchImpl = routedFetch(() => {
+      throw new Error('no request expected before validation')
+    })
+    const provider = makeProvider(fetchImpl)
+    await expect(
+      provider.createItem({
+        title: 'x',
+        relateTo: { kind: 'relates-to', targetExternalId: 'item_1' },
+      }),
+    ).rejects.toMatchObject({ category: 'invalid-input' })
+  })
+
+  it('leaves linkItems undefined: project drafts cannot be related', () => {
+    const provider: WorkProvider = makeProvider(routedFetch(() => jsonResponse(200, {})))
+    expect(provider.linkItems).toBeUndefined()
+  })
+})

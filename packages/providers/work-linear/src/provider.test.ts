@@ -723,3 +723,192 @@ describe('LinearWorkProvider body access', () => {
     expect(calls).toHaveLength(0)
   })
 })
+
+describe('LinearWorkProvider.createItem', () => {
+  function teamResponse() {
+    return jsonResponse(200, {
+      data: {
+        team: {
+          id: 'team-1',
+          states: { nodes: [{ id: 'state-1', name: 'Todo', type: 'unstarted' }] },
+          labels: { nodes: [{ id: 'label-bug', name: 'bug' }] },
+        },
+      },
+    })
+  }
+
+  function issueCreateResponse() {
+    return jsonResponse(200, { data: { issueCreate: { success: true, issue: ISSUE_FIXTURE } } })
+  }
+
+  it('sends issueCreate with teamId, title, description, and resolved labelIds, creating missing labels', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      teamResponse(),
+      jsonResponse(200, {
+        data: {
+          issueLabelCreate: { success: true, issueLabel: { id: 'label-infra', name: 'infra' } },
+        },
+      }),
+      issueCreateResponse(),
+    ])
+    const item = await provider(fetchImpl).createItem({
+      title: 'New task',
+      description: 'Do it',
+      labels: ['bug', 'infra'],
+    })
+
+    expect(graphqlBody(calls[0]).query).toContain('query Team')
+    const labelCreate = graphqlBody(calls[1])
+    expect(labelCreate.query).toContain('mutation IssueLabelCreate')
+    expect(labelCreate.variables).toEqual({ input: { name: 'infra', teamId: 'team-1' } })
+    const create = graphqlBody(calls[2])
+    expect(create.query).toContain('mutation IssueCreate')
+    expect(create.variables).toEqual({
+      input: {
+        teamId: 'team-1',
+        title: 'New task',
+        description: 'Do it',
+        labelIds: ['label-bug', 'label-infra'],
+      },
+    })
+    expect(item).toMatchObject({
+      provider: 'linear',
+      externalId: 'ENG-123',
+      title: 'Fix the thing',
+    })
+  })
+
+  it('resolves the target internal id into parentId for a child-of relateTo', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      teamResponse(),
+      jsonResponse(200, { data: { issue: { id: 'internal-uuid-2' } } }),
+      issueCreateResponse(),
+    ])
+    await provider(fetchImpl).createItem({
+      title: 'Child',
+      relateTo: { kind: 'child-of', targetExternalId: 'ENG-999' },
+    })
+
+    const idLookup = graphqlBody(calls[1])
+    expect(idLookup.query).toContain('query IssueId')
+    expect(idLookup.variables).toEqual({ id: 'ENG-999' })
+    expect(graphqlBody(calls[2]).variables).toEqual({
+      input: { teamId: 'team-1', title: 'Child', parentId: 'internal-uuid-2' },
+    })
+    expect(calls).toHaveLength(3) // no issueRelationCreate for parenting
+  })
+
+  it('creates an issue relation after create for a blocks relateTo', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      teamResponse(),
+      issueCreateResponse(),
+      jsonResponse(200, { data: { issue: { id: 'internal-uuid-2' } } }),
+      jsonResponse(200, { data: { issueRelationCreate: { success: true } } }),
+    ])
+    await provider(fetchImpl).createItem({
+      title: 'Blocker',
+      relateTo: { kind: 'blocks', targetExternalId: 'ENG-999' },
+    })
+
+    const relation = graphqlBody(calls[3])
+    expect(relation.query).toContain('mutation IssueRelationCreate')
+    expect(relation.variables).toEqual({
+      input: { issueId: 'internal-uuid-1', relatedIssueId: 'internal-uuid-2', type: 'blocks' },
+    })
+  })
+
+  it('requires a team key when neither container nor teamKey is set', async () => {
+    const { fetchImpl, calls } = fakeFetch([])
+    const p = new LinearWorkProvider({ apiKey: async () => 'k', fetchImpl })
+    await expect(p.createItem({ title: 'x' })).rejects.toMatchObject({
+      category: 'invalid-input',
+    })
+    expect(calls).toHaveLength(0)
+  })
+})
+
+describe('LinearWorkProvider.linkItems', () => {
+  const item = makeWorkItem({
+    provider: 'linear',
+    externalId: 'ENG-123',
+    metadata: { linearId: 'internal-uuid-1', teamKey: 'ENG' },
+  })
+
+  function idResponse() {
+    return jsonResponse(200, { data: { issue: { id: 'internal-uuid-2' } } })
+  }
+
+  it('child-of sets parentId on the item itself via issueUpdate', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      idResponse(),
+      jsonResponse(200, { data: { issueUpdate: { success: true } } }),
+    ])
+    await provider(fetchImpl).linkItems(item, 'child-of', 'ENG-999')
+    const update = graphqlBody(calls[1])
+    expect(update.query).toContain('mutation IssueUpdate')
+    expect(update.variables).toEqual({
+      id: 'internal-uuid-1',
+      input: { parentId: 'internal-uuid-2' },
+    })
+  })
+
+  it('parent-of sets parentId on the target via issueUpdate', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      idResponse(),
+      jsonResponse(200, { data: { issueUpdate: { success: true } } }),
+    ])
+    await provider(fetchImpl).linkItems(item, 'parent-of', 'ENG-999')
+    expect(graphqlBody(calls[1]).variables).toEqual({
+      id: 'internal-uuid-2',
+      input: { parentId: 'internal-uuid-1' },
+    })
+  })
+
+  const relationCases: readonly [
+    Parameters<LinearWorkProvider['linkItems']>[1],
+    { issueId: string; relatedIssueId: string; type: string },
+  ][] = [
+    ['blocks', { issueId: 'internal-uuid-1', relatedIssueId: 'internal-uuid-2', type: 'blocks' }],
+    [
+      'blocked-by',
+      { issueId: 'internal-uuid-2', relatedIssueId: 'internal-uuid-1', type: 'blocks' },
+    ],
+    [
+      'relates-to',
+      { issueId: 'internal-uuid-1', relatedIssueId: 'internal-uuid-2', type: 'related' },
+    ],
+    [
+      'duplicates',
+      { issueId: 'internal-uuid-1', relatedIssueId: 'internal-uuid-2', type: 'duplicate' },
+    ],
+  ]
+
+  for (const [kind, expectedInput] of relationCases) {
+    it(`maps ${kind} onto issueRelationCreate type "${expectedInput.type}" with the right direction`, async () => {
+      const { fetchImpl, calls } = fakeFetch([
+        idResponse(),
+        jsonResponse(200, { data: { issueRelationCreate: { success: true } } }),
+      ])
+      await provider(fetchImpl).linkItems(item, kind, 'ENG-999')
+      const relation = graphqlBody(calls[1])
+      expect(relation.query).toContain('mutation IssueRelationCreate')
+      expect(relation.variables).toEqual({ input: expectedInput })
+    })
+  }
+
+  it('rejects an item missing the Linear internal id without any request', async () => {
+    const { fetchImpl, calls } = fakeFetch([])
+    const bare = makeWorkItem({ provider: 'linear', externalId: 'ENG-123' })
+    await expect(provider(fetchImpl).linkItems(bare, 'blocks', 'ENG-999')).rejects.toMatchObject({
+      category: 'invalid-input',
+    })
+    expect(calls).toHaveLength(0)
+  })
+
+  it('rejects an unknown link target', async () => {
+    const { fetchImpl } = fakeFetch([jsonResponse(200, { data: { issue: null } })])
+    await expect(provider(fetchImpl).linkItems(item, 'blocks', 'ENG-404')).rejects.toMatchObject({
+      category: 'invalid-input',
+    })
+  })
+})

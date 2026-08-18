@@ -126,6 +126,23 @@ export function describeWorkProviderContract(
       expect(states.length).toBeGreaterThan(0)
     })
 
+    it('createItem() returns an item retrievable via get() carrying title and labels, when supported', async () => {
+      const provider = await factory()
+      if (!provider.createItem) return // creation is optional
+      await seed(provider)
+
+      const created = await provider.createItem({
+        title: 'Contract created item',
+        labels: ['contract-created'],
+      })
+      expect(created.title).toBe('Contract created item')
+      expect(created.labels).toContain('contract-created')
+
+      const fetched = await provider.get(created.externalId, created.repository?.locator)
+      expect(fetched.title).toBe('Contract created item')
+      expect(fetched.labels).toContain('contract-created')
+    })
+
     it('updateDescription() round-trips through getDescription() when both are supported', async () => {
       const provider = await factory()
       const items = await seed(provider)

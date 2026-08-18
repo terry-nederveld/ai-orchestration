@@ -312,6 +312,175 @@ describe('GitHubIssuesWorkProvider.transition', () => {
   })
 })
 
+describe('GitHubIssuesWorkProvider.createItem', () => {
+  it('POSTs title, body, and labels to the issues endpoint and maps the created issue', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      jsonResponse(201, {
+        id: 1042,
+        number: 42,
+        node_id: 'n42',
+        title: 'New task',
+        body: 'Do it',
+        state: 'open',
+        labels: [{ name: 'bug' }],
+        html_url: 'https://github.com/acme/widgets/issues/42',
+        updated_at: '2026-01-01T00:00:00Z',
+      }),
+    ])
+    const provider = makeProvider(fetchImpl)
+    const item = await provider.createItem({
+      title: 'New task',
+      description: 'Do it',
+      labels: ['bug'],
+    })
+
+    expect(calls[0]?.url).toContain('/repos/acme/widgets/issues')
+    expect(calls[0]?.init.method).toBe('POST')
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+      title: 'New task',
+      body: 'Do it',
+      labels: ['bug'],
+    })
+    expect(item).toMatchObject({
+      provider: 'github',
+      externalId: '42',
+      title: 'New task',
+      labels: ['bug'],
+    })
+  })
+
+  it('honors draft.container as the target repo', async () => {
+    const backend = new FakeGitHubBackend('other/repo')
+    const provider = makeProvider(backend.fetchImpl)
+    const item = await provider.createItem({ title: 'Elsewhere', container: 'other/repo' })
+    expect(item.repository?.locator).toBe('other/repo')
+  })
+
+  it('appends a reference line to the body for relateTo', async () => {
+    const backend = new FakeGitHubBackend('acme/widgets')
+    const provider = makeProvider(backend.fetchImpl)
+    const item = await provider.createItem({
+      title: 'Child task',
+      description: 'Body',
+      relateTo: { kind: 'child-of', targetExternalId: '7' },
+    })
+    expect(item.description).toBe('Body\n\nPart of #7')
+  })
+
+  it('uses the reference line alone as the body when there is no description', async () => {
+    const backend = new FakeGitHubBackend('acme/widgets')
+    const provider = makeProvider(backend.fetchImpl)
+    const item = await provider.createItem({
+      title: 'Related task',
+      relateTo: { kind: 'relates-to', targetExternalId: '9' },
+    })
+    expect(item.description).toBe('Relates to #9')
+  })
+
+  it('propagates mapped errors', async () => {
+    const { fetchImpl } = fakeFetch([textErrorResponse(500, 'oops')])
+    const provider = makeProvider(fetchImpl)
+    await expect(provider.createItem({ title: 'x' })).rejects.toMatchObject({
+      category: 'provider-outage',
+    })
+  })
+})
+
+describe('GitHubIssuesWorkProvider.linkItems', () => {
+  it('parent-of adds the target as a sub-issue by database id', async () => {
+    const backend = new FakeGitHubBackend('acme/widgets')
+    const parent = backend.addIssue({ title: 'Parent' })
+    const child = backend.addIssue({ title: 'Child' })
+    const provider = makeProvider(backend.fetchImpl)
+    const item = await provider.get(String(parent))
+
+    await provider.linkItems(item, 'parent-of', String(child))
+    expect(backend.subIssuesOf(parent)).toEqual([child])
+  })
+
+  it('child-of registers the item under the target parent', async () => {
+    const backend = new FakeGitHubBackend('acme/widgets')
+    const parent = backend.addIssue({ title: 'Parent' })
+    const child = backend.addIssue({ title: 'Child' })
+    const provider = makeProvider(backend.fetchImpl)
+    const item = await provider.get(String(child))
+
+    await provider.linkItems(item, 'child-of', String(parent))
+    expect(backend.subIssuesOf(parent)).toEqual([child])
+  })
+
+  it('sends sub_issue_id in the sub-issues request body', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      jsonResponse(200, {
+        id: 2007,
+        number: 7,
+        node_id: 'n7',
+        title: 'Child',
+        body: null,
+        state: 'open',
+        labels: [],
+        html_url: 'u',
+        updated_at: 'x',
+      }),
+      jsonResponse(201, {}),
+    ])
+    const provider = makeProvider(fetchImpl)
+    const parent: WorkItem = {
+      id: asId('github:acme/widgets#3'),
+      provider: 'github',
+      externalId: '3',
+      title: 'Parent',
+      state: 'open',
+      labels: [],
+      assignees: [],
+      relationships: [],
+      repository: { locator: 'acme/widgets' },
+      metadata: {},
+    }
+    await provider.linkItems(parent, 'parent-of', '7')
+
+    expect(calls[0]?.url).toContain('/repos/acme/widgets/issues/7')
+    expect(calls[1]?.url).toContain('/repos/acme/widgets/issues/3/sub_issues')
+    expect(calls[1]?.init.method).toBe('POST')
+    expect(JSON.parse(String(calls[1]?.init.body))).toEqual({ sub_issue_id: 2007 })
+  })
+
+  it('falls back to a body reference when sub-issues are unavailable', async () => {
+    const backend = new FakeGitHubBackend('acme/widgets')
+    backend.subIssuesEnabled = false
+    const parent = backend.addIssue({ title: 'Parent' })
+    const child = backend.addIssue({ title: 'Child', body: 'Existing body' })
+    const provider = makeProvider(backend.fetchImpl)
+    const item = await provider.get(String(child))
+
+    await provider.linkItems(item, 'child-of', String(parent))
+    expect(backend.subIssuesOf(parent)).toEqual([])
+    expect(backend.bodyOf(child)).toBe(`Existing body\n\nPart of #${parent}`)
+  })
+
+  it('models relates-to as a body reference line', async () => {
+    const backend = new FakeGitHubBackend('acme/widgets')
+    const a = backend.addIssue({ title: 'A', body: 'A body' })
+    const b = backend.addIssue({ title: 'B' })
+    const provider = makeProvider(backend.fetchImpl)
+    const item = await provider.get(String(a))
+
+    await provider.linkItems(item, 'relates-to', String(b))
+    expect(backend.bodyOf(a)).toBe(`A body\n\nRelates to #${b}`)
+  })
+
+  it('models blocks as a body reference line', async () => {
+    const backend = new FakeGitHubBackend('acme/widgets')
+    const a = backend.addIssue({ title: 'A' })
+    const b = backend.addIssue({ title: 'B' })
+    const provider = makeProvider(backend.fetchImpl)
+    const item = await provider.get(String(a))
+
+    await provider.linkItems(item, 'blocks', String(b))
+    expect(backend.bodyOf(a)).toBe(`Blocks #${b}`)
+  })
+})
+
 describe('GitHubIssuesWorkProvider error mapping', () => {
   const item: WorkItem = {
     id: asId('github:acme/widgets#1'),

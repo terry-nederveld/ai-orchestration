@@ -394,3 +394,178 @@ describe('JiraCloudWorkProvider body access', () => {
     })
   })
 })
+
+describe('JiraCloudWorkProvider.createItem', () => {
+  it('POSTs project, summary, issuetype, labels, and ADF description, then re-fetches the canonical item', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      jsonResponse(201, { id: '10001', key: 'PROJ-9', self: 'https://x/issue/10001' }),
+      jsonResponse(200, issueFixture('PROJ-9', { summary: 'New task' })),
+    ])
+    const provider = makeProvider(fetchImpl, { projectKey: 'PROJ' })
+    const item = await provider.createItem({
+      title: 'New task',
+      description: 'Do it',
+      labels: ['infra'],
+    })
+
+    expect(calls[0]?.url).toContain('/rest/api/3/issue')
+    expect(calls[0]?.init.method).toBe('POST')
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+      fields: {
+        project: { key: 'PROJ' },
+        summary: 'New task',
+        issuetype: { name: 'Task' },
+        description: {
+          type: 'doc',
+          version: 1,
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Do it' }] }],
+        },
+        labels: ['infra'],
+      },
+    })
+    expect(calls[1]?.url).toContain('/issue/PROJ-9')
+    expect(item.externalId).toBe('PROJ-9')
+    expect(item.title).toBe('New task')
+  })
+
+  it('honors draft.type and draft.container over the configured project key', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      jsonResponse(201, { id: '10002', key: 'OTHER-1' }),
+      jsonResponse(200, issueFixture('OTHER-1')),
+    ])
+    const provider = makeProvider(fetchImpl, { projectKey: 'PROJ' })
+    await provider.createItem({ title: 'A bug', type: 'Bug', container: 'OTHER' })
+    const body = JSON.parse(String(calls[0]?.init.body))
+    expect(body.fields.project).toEqual({ key: 'OTHER' })
+    expect(body.fields.issuetype).toEqual({ name: 'Bug' })
+  })
+
+  it('requires a project key when neither container nor projectKey is set', async () => {
+    const { fetchImpl, calls } = fakeFetch([])
+    const provider = makeProvider(fetchImpl)
+    await expect(provider.createItem({ title: 'x' })).rejects.toMatchObject({
+      category: 'invalid-input',
+    })
+    expect(calls).toHaveLength(0)
+  })
+
+  it('sets the parent field for a child-of relateTo instead of creating a link', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      jsonResponse(201, { id: '10003', key: 'PROJ-10' }),
+      jsonResponse(200, issueFixture('PROJ-10')),
+    ])
+    const provider = makeProvider(fetchImpl, { projectKey: 'PROJ' })
+    await provider.createItem({
+      title: 'Subtask-ish',
+      relateTo: { kind: 'child-of', targetExternalId: 'PROJ-1' },
+    })
+    const body = JSON.parse(String(calls[0]?.init.body))
+    expect(body.fields.parent).toEqual({ key: 'PROJ-1' })
+    expect(calls).toHaveLength(2) // create + canonical re-fetch, no issueLink call
+  })
+
+  it('creates an issue link after create for a relates-to relateTo', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      jsonResponse(201, { id: '10004', key: 'PROJ-11' }),
+      jsonResponse(200, issueFixture('PROJ-11')),
+      jsonResponse(201, {}),
+    ])
+    const provider = makeProvider(fetchImpl, { projectKey: 'PROJ' })
+    await provider.createItem({
+      title: 'Related',
+      relateTo: { kind: 'relates-to', targetExternalId: 'PROJ-2' },
+    })
+    expect(calls[2]?.url).toContain('/rest/api/3/issueLink')
+    expect(JSON.parse(String(calls[2]?.init.body))).toEqual({
+      type: { name: 'Relates' },
+      outwardIssue: { key: 'PROJ-11' },
+      inwardIssue: { key: 'PROJ-2' },
+    })
+  })
+})
+
+describe('JiraCloudWorkProvider.linkItems', () => {
+  function makeItem(externalId: string): WorkItem {
+    return {
+      id: `jira-cloud:${externalId}` as WorkItem['id'],
+      provider: 'jira-cloud',
+      externalId,
+      title: 'x',
+      state: 'To Do',
+      labels: [],
+      assignees: [],
+      relationships: [],
+      metadata: {},
+    }
+  }
+
+  const linkCases: readonly [
+    Parameters<JiraCloudWorkProvider['linkItems']>[1],
+    { type: { name: string }; outwardIssue: { key: string }; inwardIssue: { key: string } },
+  ][] = [
+    [
+      'blocks',
+      { type: { name: 'Blocks' }, outwardIssue: { key: 'PROJ-1' }, inwardIssue: { key: 'PROJ-2' } },
+    ],
+    [
+      'blocked-by',
+      { type: { name: 'Blocks' }, outwardIssue: { key: 'PROJ-2' }, inwardIssue: { key: 'PROJ-1' } },
+    ],
+    [
+      'relates-to',
+      {
+        type: { name: 'Relates' },
+        outwardIssue: { key: 'PROJ-1' },
+        inwardIssue: { key: 'PROJ-2' },
+      },
+    ],
+    [
+      'duplicates',
+      {
+        type: { name: 'Duplicate' },
+        outwardIssue: { key: 'PROJ-1' },
+        inwardIssue: { key: 'PROJ-2' },
+      },
+    ],
+  ]
+
+  for (const [kind, expected] of linkCases) {
+    it(`maps ${kind} onto the ${expected.type.name} link type with the right direction`, async () => {
+      const { fetchImpl, calls } = fakeFetch([jsonResponse(201, {})])
+      const provider = makeProvider(fetchImpl)
+      await provider.linkItems(makeItem('PROJ-1'), kind, 'PROJ-2')
+      expect(calls[0]?.url).toContain('/rest/api/3/issueLink')
+      expect(calls[0]?.init.method).toBe('POST')
+      expect(JSON.parse(String(calls[0]?.init.body))).toEqual(expected)
+    })
+  }
+
+  it('child-of sets the parent field on the item itself', async () => {
+    const { fetchImpl, calls } = fakeFetch([new Response(null, { status: 204 })])
+    const provider = makeProvider(fetchImpl)
+    await provider.linkItems(makeItem('PROJ-1'), 'child-of', 'PROJ-2')
+    expect(calls[0]?.url).toContain('/issue/PROJ-1')
+    expect(calls[0]?.init.method).toBe('PUT')
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+      fields: { parent: { key: 'PROJ-2' } },
+    })
+  })
+
+  it('parent-of sets the parent field on the target', async () => {
+    const { fetchImpl, calls } = fakeFetch([new Response(null, { status: 204 })])
+    const provider = makeProvider(fetchImpl)
+    await provider.linkItems(makeItem('PROJ-1'), 'parent-of', 'PROJ-2')
+    expect(calls[0]?.url).toContain('/issue/PROJ-2')
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+      fields: { parent: { key: 'PROJ-1' } },
+    })
+  })
+
+  it('propagates mapped errors', async () => {
+    const { fetchImpl } = fakeFetch([textErrorResponse(500, 'oops')])
+    const provider = makeProvider(fetchImpl)
+    await expect(provider.linkItems(makeItem('PROJ-1'), 'blocks', 'PROJ-2')).rejects.toMatchObject({
+      category: 'provider-outage',
+    })
+  })
+})
