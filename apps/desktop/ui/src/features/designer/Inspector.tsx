@@ -57,7 +57,7 @@ function NodeInspector({
         setError('config must be a JSON object')
         return
       }
-      if (typeof parsed['kind'] !== 'string') {
+      if (typeof parsed.kind !== 'string') {
         setError('config must declare a string kind')
         return
       }

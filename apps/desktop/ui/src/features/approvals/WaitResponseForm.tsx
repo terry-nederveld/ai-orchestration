@@ -38,8 +38,8 @@ function isJudgmentPackage(value: unknown): value is JudgmentPackage {
 }
 
 export function judgmentFromWait(wait: WaitCondition): JudgmentPackage | undefined {
-  if (wait.parameters['reason'] !== EXPERIMENT_JUDGMENT_REASON) return undefined
-  const judgment = wait.parameters['judgment']
+  if (wait.parameters.reason !== EXPERIMENT_JUDGMENT_REASON) return undefined
+  const judgment = wait.parameters.judgment
   return isJudgmentPackage(judgment) ? judgment : undefined
 }
 
@@ -158,21 +158,26 @@ export function WaitResponseForm({
         </div>
       ) : (
         <form onSubmit={handleSubmit} className={styles.form}>
+          {spec.type === 'secret' && (
+            <input
+              type="password"
+              className={styles.textarea}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="secret value (stored securely, never displayed)"
+              autoComplete="off"
+              disabled={disabled}
+            />
+          )}
+
           {(spec.type === 'text' ||
             spec.type === 'free-form' ||
-            spec.type === 'secret' ||
             spec.type === 'file-reference') && (
             <textarea
               className={styles.textarea}
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder={
-                spec.type === 'secret'
-                  ? 'stored secret name'
-                  : spec.type === 'file-reference'
-                    ? 'file reference'
-                    : 'type your response'
-              }
+              placeholder={spec.type === 'file-reference' ? 'file reference' : 'type your response'}
               disabled={disabled}
             />
           )}

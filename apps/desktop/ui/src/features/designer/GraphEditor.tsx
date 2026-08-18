@@ -31,8 +31,8 @@ function isGraphShaped(value: unknown): value is WorkflowGraphDoc {
     value !== null &&
     typeof value === 'object' &&
     !Array.isArray(value) &&
-    Array.isArray((value as Record<string, unknown>)['nodes']) &&
-    Array.isArray((value as Record<string, unknown>)['transitions'])
+    Array.isArray((value as Record<string, unknown>).nodes) &&
+    Array.isArray((value as Record<string, unknown>).transitions)
   )
 }
 
