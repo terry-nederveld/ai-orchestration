@@ -4,7 +4,12 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "references": [{ "path": "../core" }],
+  "references": [
+    { "path": "../core" },
+    { "path": "../orchestrator" },
+    { "path": "../persistence" },
+    { "path": "../testkit" }
+  ],
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"]
 }

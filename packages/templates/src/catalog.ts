@@ -6,7 +6,12 @@
  * reinstallation idempotent).
  */
 
-import type { DefinitionStore, EvaluationRubric, ExperimentDefinition } from '@overture/core'
+import type {
+  AgentProfileDefinition,
+  DefinitionStore,
+  EvaluationRubric,
+  ExperimentDefinition,
+} from '@overture/core'
 import { DefinitionKind } from '@overture/core'
 import {
   DELIVERY_DOD_NAME,
@@ -60,6 +65,33 @@ export const discoveryExperiment: ExperimentDefinition = {
   maxIterations: 3,
 }
 
+/**
+ * Default profiles referenced by the flagship graphs. Operators fork or
+ * compose these; the executor ids match the daemon's standard registrations
+ * (CLI agent providers plus native-<provider> runtimes).
+ */
+export const deliveryDefaultProfile: AgentProfileDefinition = {
+  name: 'delivery-default',
+  description:
+    'Coding profile for Autonomous Delivery: CLI coding agent first, native runtime fallback on provider outage.',
+  fragment: {
+    primary: { executor: 'claude-code' },
+    fallback: { chain: [{ executor: 'native-anthropic' }], trigger: 'outage-only' },
+    maxTurns: 80,
+  },
+}
+
+export const discoveryDefaultProfile: AgentProfileDefinition = {
+  name: 'discovery-default',
+  description:
+    'Research profile for Autonomous Discovery: native runtime first, CLI agent fallback on provider outage.',
+  fragment: {
+    primary: { executor: 'native-anthropic' },
+    fallback: { chain: [{ executor: 'claude-code' }], trigger: 'outage-only' },
+    maxTurns: 40,
+  },
+}
+
 export interface TemplateDescriptor {
   readonly name: string
   readonly description: string
@@ -103,6 +135,11 @@ export const templates: readonly TemplateDescriptor[] = [
         name: DELIVERY_DOD_NAME,
         document: deliveryDefinitionOfDone as unknown as Record<string, unknown>,
       },
+      {
+        kind: DefinitionKind.AgentProfile,
+        name: deliveryDefaultProfile.name,
+        document: deliveryDefaultProfile as unknown as Record<string, unknown>,
+      },
     ],
   },
   {
@@ -134,6 +171,11 @@ export const templates: readonly TemplateDescriptor[] = [
         kind: DefinitionKind.Experiment,
         name: DISCOVERY_EXPERIMENT_NAME,
         document: discoveryExperiment as unknown as Record<string, unknown>,
+      },
+      {
+        kind: DefinitionKind.AgentProfile,
+        name: discoveryDefaultProfile.name,
+        document: discoveryDefaultProfile as unknown as Record<string, unknown>,
       },
     ],
   },

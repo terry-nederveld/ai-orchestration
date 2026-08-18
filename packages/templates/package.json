@@ -21,7 +21,9 @@
     "@overture/core": "workspace:*"
   },
   "devDependencies": {
+    "@overture/orchestrator": "workspace:*",
     "@overture/persistence": "workspace:*",
+    "@overture/testkit": "workspace:*",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   }
