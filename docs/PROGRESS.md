@@ -101,8 +101,12 @@ run UX, and the workflow designer. v1 delivery report: docs/DELIVERY.md.
   round-trip over one canonical document + Evaluate panel); docs
   refresh (durable-workflows.md reference + four updated pages);
   ADRs 0021–0026.
-- In flight: independent architecture + security reviews, §40 clean
-  checkout validation, final report.
+- COMPLETE: independent architecture review (4 must-fix remediated with
+  regression tests) and security review (3 high remediated); §40 clean-
+  checkout validation green (1,779 package + 89 UI tests from a fresh
+  clone, lint clean, live daemon boot verified); final delivery report at
+  docs/DELIVERY-PHASE2.md. Deferred/partial items documented there and in
+  docs/security.md, not silent.
 
 ## Completed Milestones
 
