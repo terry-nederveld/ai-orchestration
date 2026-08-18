@@ -23,6 +23,7 @@ import type {
   RepositoryReference,
   Run,
   RunGraphState,
+  RunId,
   UsageRecord,
   WaitCondition,
   WaitKind,
@@ -75,6 +76,10 @@ export interface GraphWaitCoordinator {
       readonly event?: Readonly<Record<string, unknown>>
     },
   ): Promise<{ readonly accepted: boolean; readonly reason?: string }>
+  /** Cancel a graph run (active or durably waiting). */
+  cancel?(runId: RunId, reason?: string): Promise<boolean>
+  /** Graph runs currently executing in this process. */
+  activeRunIds?(): readonly string[]
 }
 
 /** Work-centric view of a durable graph run. */
@@ -255,7 +260,10 @@ export class OvertureService {
   }
 
   async cancelRun(id: string): Promise<boolean> {
-    return this.deps.coordinator.cancel(asId<'run'>(id))
+    const cancelled = await this.deps.coordinator.cancel(asId<'run'>(id))
+    if (cancelled) return true
+    // Not a v1 run: try the durable graph runtime when assembled.
+    return (await this.deps.graphCoordinator?.cancel?.(asId<'run'>(id))) ?? false
   }
 
   /** Re-queue a failed/blocked/cancelled run as a fresh attempt. */
@@ -688,6 +696,9 @@ export class OvertureService {
   async cancelAllActive(): Promise<void> {
     for (const id of this.deps.coordinator.activeRunIds()) {
       await this.deps.coordinator.cancel(asId<'run'>(id), 'daemon shutdown')
+    }
+    for (const id of this.deps.graphCoordinator?.activeRunIds?.() ?? []) {
+      await this.deps.graphCoordinator?.cancel?.(asId<'run'>(id), 'daemon shutdown')
     }
   }
 }

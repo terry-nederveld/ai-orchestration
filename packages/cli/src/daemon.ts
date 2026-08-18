@@ -31,8 +31,10 @@ import {
   GraphScheduler,
   ProfileAgentRouter,
   profileExperimentStepperFactory,
+  ROUTING_RULE_PROPOSAL,
   RunCoordinator,
   Scheduler,
+  WORKFLOW_SELECTION_REQUIRED,
   WorkflowActionRegistry,
 } from '@overture/orchestrator'
 import { RuleBasedPolicyEngine, workspaceCodingRules } from '@overture/policy'
@@ -595,6 +597,14 @@ export async function assembleDaemon(options: {
       // Coding runs (a workspace exists) checkpoint to the run branch;
       // everything else checkpoints into the work item's managed section.
       select: (_run, workspace) => (workspace ? gitCheckpoints : sectionCheckpoints),
+      // Restore selects by the persisted checkpoint's own strategy id: at
+      // resume time no workspace exists yet, so presence can't decide.
+      forStrategy: (id) =>
+        id === gitCheckpoints.id
+          ? gitCheckpoints
+          : id === sectionCheckpoints.id
+            ? sectionCheckpoints
+            : undefined,
     },
     experiments: profileExperimentStepperFactory({
       experiments: persistence.experiments,
@@ -617,9 +627,9 @@ export async function assembleDaemon(options: {
     logger: logger.child({ component: 'graph-scheduler' }),
   })
 
-  // Routing-selection waits live under a synthetic `routing:` run, so they
-  // resolve through the scheduler; every other wait resumes its run through
-  // the graph coordinator.
+  // Routing waits live under synthetic `routing:`/`routing-rule:` runs, so
+  // they resolve through the scheduler; every other wait resumes its run
+  // through the graph coordinator.
   const graphWaits = {
     satisfy: async (
       waitId: string,
@@ -631,7 +641,7 @@ export async function assembleDaemon(options: {
       },
     ): Promise<{ readonly accepted: boolean; readonly reason?: string }> => {
       const condition = await persistence.waits.get(waitId)
-      if (condition?.parameters['reason'] === 'WORKFLOW_SELECTION_REQUIRED') {
+      if (condition?.parameters['reason'] === WORKFLOW_SELECTION_REQUIRED) {
         const outcome = await graphScheduler.onSelection(waitId, {
           workflow: String(response.value ?? ''),
           responder: response.responder,
@@ -641,8 +651,23 @@ export async function assembleDaemon(options: {
           ...(outcome.reason !== undefined ? { reason: outcome.reason } : {}),
         }
       }
+      if (condition?.parameters['reason'] === ROUTING_RULE_PROPOSAL) {
+        const outcome = await graphScheduler.onRuleApproval(waitId, {
+          approved: response.value === true,
+          responder: response.responder,
+        })
+        return {
+          accepted: outcome.accepted,
+          ...(outcome.accepted
+            ? {}
+            : { reason: outcome.persisted ? 'already decided' : 'not an open rule proposal' }),
+        }
+      }
       return graphCoordinator.satisfy(waitId, response)
     },
+    cancel: (runId: import('@overture/core').RunId, reason?: string) =>
+      graphCoordinator.cancel(runId, reason),
+    activeRunIds: () => graphCoordinator.activeRunIds(),
   }
 
   const dispatchLanes = async (): Promise<void> => {
@@ -721,15 +746,26 @@ export async function runDaemon(args: readonly string[], stateDir: string): Prom
       : config.daemon.port
 
   await service.start()
-  await graphRecover().catch((error) => {
+  const handle = await startControlPlane(service, { host: config.daemon.host, port })
+  // Recovery can involve hours of inline agent execution: it runs after
+  // the control plane is up so the API, SSE, and cancel stay available.
+  void graphRecover().catch((error) => {
     process.stderr.write(`graph recovery failed: ${String(error)}\n`)
   })
+  // Ticks never overlap: lane dispatch and schedule firing run inline and
+  // may outlast the poll interval; an in-flight tick skips the next firing.
+  let graphTicking = false
   const graphInterval = setInterval(() => {
-    void graphTick().catch((error) => {
-      process.stderr.write(`graph tick failed: ${String(error)}\n`)
-    })
+    if (graphTicking) return
+    graphTicking = true
+    void graphTick()
+      .catch((error) => {
+        process.stderr.write(`graph tick failed: ${String(error)}\n`)
+      })
+      .finally(() => {
+        graphTicking = false
+      })
   }, config.orchestrator.pollIntervalMs)
-  const handle = await startControlPlane(service, { host: config.daemon.host, port })
   await writeDaemonInfo(stateDir, {
     host: handle.host,
     port: handle.port,
