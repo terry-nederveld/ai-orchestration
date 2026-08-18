@@ -117,6 +117,140 @@ const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    id: 7,
+    name: 'create_definitions',
+    sql: `
+      CREATE TABLE definition_versions (
+        kind TEXT NOT NULL,
+        name TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        content_hash TEXT NOT NULL,
+        document TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (kind, name, version)
+      );
+      CREATE TABLE definition_lifecycles (
+        kind TEXT NOT NULL,
+        name TEXT NOT NULL,
+        lifecycle TEXT NOT NULL DEFAULT 'draft',
+        PRIMARY KEY (kind, name)
+      );
+      CREATE TABLE snapshots (
+        id TEXT PRIMARY KEY,
+        root TEXT NOT NULL,
+        definitions TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+    `,
+  },
+  {
+    id: 8,
+    name: 'create_waits',
+    sql: `
+      CREATE TABLE wait_conditions (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        parameters TEXT NOT NULL,
+        request TEXT,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        due_at TEXT,
+        satisfied_at TEXT,
+        satisfaction TEXT
+      );
+      CREATE INDEX idx_wait_conditions_status_due_at ON wait_conditions(status, due_at);
+      CREATE INDEX idx_wait_conditions_run_id ON wait_conditions(run_id);
+      CREATE TABLE supplemental_inputs (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        wait_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        input TEXT NOT NULL,
+        promoted_at TEXT
+      );
+      CREATE INDEX idx_supplemental_inputs_run_id ON supplemental_inputs(run_id);
+      CREATE INDEX idx_supplemental_inputs_wait_id ON supplemental_inputs(wait_id);
+    `,
+  },
+  {
+    id: 9,
+    name: 'create_run_graph_state',
+    sql: `
+      CREATE TABLE run_graph_state (
+        run_id TEXT PRIMARY KEY,
+        snapshot_id TEXT NOT NULL,
+        state TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `,
+  },
+  {
+    id: 10,
+    name: 'create_execution_specs',
+    sql: `
+      CREATE TABLE execution_specs (
+        run_id TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        spec TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (run_id, revision)
+      );
+    `,
+  },
+  {
+    id: 11,
+    name: 'create_checkpoints',
+    sql: `
+      CREATE TABLE checkpoints (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        strategy TEXT NOT NULL,
+        coordinates TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        spec_revision INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_checkpoints_run_id ON checkpoints(run_id);
+    `,
+  },
+  {
+    id: 12,
+    name: 'create_experiments',
+    sql: `
+      CREATE TABLE experiments (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        record TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_experiments_run_id ON experiments(run_id);
+      CREATE TABLE judgments (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        experiment_id TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        at TEXT NOT NULL
+      );
+      CREATE INDEX idx_judgments_experiment_id ON judgments(experiment_id);
+      CREATE INDEX idx_judgments_at ON judgments(at);
+    `,
+  },
+  {
+    id: 13,
+    name: 'create_schedule_firings',
+    sql: `
+      CREATE TABLE schedule_firings (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        schedule_name TEXT NOT NULL,
+        due_at TEXT NOT NULL,
+        fired_at TEXT,
+        run_id TEXT
+      );
+      CREATE INDEX idx_schedule_firings_name_due_at ON schedule_firings(schedule_name, due_at);
+    `,
+  },
 ]
 
 export function migrate(db: Database): void {

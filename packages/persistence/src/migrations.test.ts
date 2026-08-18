@@ -17,13 +17,24 @@ describe('migrate', () => {
     const db = new Database(':memory:')
     migrate(db)
     expect(tableNames(db)).toEqual([
+      'checkpoints',
       'claims',
       'config',
+      'definition_lifecycles',
+      'definition_versions',
       'events',
+      'execution_specs',
+      'experiments',
+      'judgments',
       'migrations',
+      'run_graph_state',
       'runs',
+      'schedule_firings',
       'sessions',
+      'snapshots',
+      'supplemental_inputs',
       'usage_records',
+      'wait_conditions',
     ])
   })
 
