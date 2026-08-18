@@ -476,6 +476,9 @@ export class OvertureService {
     if (result.accepted) return { outcome: 'accepted' }
     const settled = await this.deps.persistence.waits.get(id)
     const winning = settled?.satisfaction
+    // A secret wait's value is never echoed — even the stored value is only
+    // the secret name, but we omit it entirely to keep the contract clear.
+    const echoValue = condition.request?.type !== 'secret'
     return this.redact({
       outcome: 'conflict',
       reason: result.reason ?? 'already satisfied',
@@ -487,7 +490,7 @@ export class OvertureService {
                 ? {
                     responder: winning.input.responder,
                     channel: winning.input.channel,
-                    value: winning.input.value,
+                    ...(echoValue ? { value: winning.input.value } : {}),
                   }
                 : {}),
             },

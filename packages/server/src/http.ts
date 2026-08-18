@@ -36,8 +36,12 @@ export async function startControlPlane(
 
   const server = createServer((request, response) => {
     void route(service, token, request, response).catch((error) => {
+      // Log method + path only — never the raw URL: SSE carries the bearer
+      // token as a query parameter, so logging request.url would leak a
+      // live credential (security.md).
       logger.error('request failed', {
-        url: request.url,
+        method: request.method ?? 'GET',
+        path: request.url ? request.url.split('?')[0] : '',
         error: error instanceof Error ? error.message : String(error),
       })
       if (!response.headersSent) {
