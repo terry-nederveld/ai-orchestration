@@ -347,8 +347,27 @@ export function createGraphNodeExecutors(deps: GraphExecutorDeps): GraphNodeExec
         error: `unknown workflow action: ${node.config.action}`,
       }
     }
+    // '$expr:' prefixed string arguments evaluate against the run scope —
+    // an explicit, deterministic opt-in (never shell-interpolated).
+    const args: Record<string, unknown> = {}
+    const argScope = {
+      vars: context.variables,
+      domain: context.domain.data,
+      results: Object.fromEntries(
+        Object.entries(context.nodeResults).map(([key, result]) => [
+          key,
+          { status: result.status, outputs: result.outputs },
+        ]),
+      ),
+    }
+    for (const [key, value] of Object.entries(node.config.with ?? {})) {
+      args[key] =
+        typeof value === 'string' && value.startsWith('$expr:')
+          ? evaluateScopeValue(value.slice('$expr:'.length), argScope)
+          : value
+    }
     try {
-      const outputs = await implementation.execute(node.config.with ?? {}, {
+      const outputs = await implementation.execute(args, {
         runId: String(deps.run.id),
         variables: context.variables,
         stepResults: new Map(),
@@ -610,6 +629,15 @@ async function evaluateGateNode(
         : undefined
 
   const evaluations: GateEvaluation[] = []
+  const results: Record<string, unknown> = {}
+  for (const [nodeIdKey, result] of Object.entries(context.nodeResults)) {
+    results[nodeIdKey] = {
+      status: result.status,
+      succeeded: result.status === 'succeeded',
+      failed: result.status === 'failed',
+      outputs: result.outputs,
+    }
+  }
   const scope = {
     item: {
       title: deps.item.title,
@@ -620,6 +648,7 @@ async function evaluateGateNode(
     },
     domain: context.domain.data,
     vars: context.variables,
+    results,
   }
 
   const evaluateOnce = async (gate: Gate, attempt: number): Promise<GateEvaluation> => {

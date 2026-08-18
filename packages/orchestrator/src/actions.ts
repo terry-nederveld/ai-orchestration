@@ -5,7 +5,7 @@
  */
 
 import type { WorkflowAction } from '@overture/core'
-import { asId, OrchestratorError } from '@overture/core'
+import { asId, OrchestratorError, upsertManagedSection } from '@overture/core'
 import type { RunActionContext, WorkflowActionFactory } from './ports.js'
 
 /**
@@ -129,6 +129,70 @@ function workCommentAction(context: RunActionContext): WorkflowAction {
   }
 }
 
+/** `work.create_item` — create a related work item (story, sub-task). */
+function workCreateItemAction(context: RunActionContext): WorkflowAction {
+  return {
+    id: 'work.create_item',
+    async execute(args) {
+      const { work, workItem } = context
+      if (!work.createItem) {
+        throw new OrchestratorError(
+          `work provider '${work.info.id}' does not support item creation`,
+          'capability-mismatch',
+        )
+      }
+      const title = typeof args.title === 'string' ? args.title : ''
+      if (!title) throw new OrchestratorError('work.create_item requires a title', 'invalid-input')
+      const relateToParent = args.relate_to_parent !== false
+      const created = await work.createItem({
+        title,
+        ...(typeof args.description === 'string' ? { description: args.description } : {}),
+        ...(typeof args.type === 'string' ? { type: args.type } : {}),
+        ...(Array.isArray(args.labels)
+          ? { labels: args.labels.filter((label): label is string => typeof label === 'string') }
+          : {}),
+        ...(relateToParent
+          ? { relateTo: { kind: 'child-of', targetExternalId: workItem.externalId } }
+          : {}),
+      })
+      return { created: true, externalId: created.externalId, url: created.url ?? '' }
+    },
+  }
+}
+
+/**
+ * `work.update_section` — update the managed section of the work item's
+ * body, preserving all human content (refuses damaged delimiters).
+ */
+function workUpdateSectionAction(context: RunActionContext): WorkflowAction {
+  return {
+    id: 'work.update_section',
+    async execute(args) {
+      const { work, workItem } = context
+      const content = typeof args.content === 'string' ? args.content : ''
+      if (!content) {
+        throw new OrchestratorError('work.update_section requires content', 'invalid-input')
+      }
+      if (!work.getDescription || !work.updateDescription) {
+        throw new OrchestratorError(
+          `work provider '${work.info.id}' does not support body updates`,
+          'capability-mismatch',
+        )
+      }
+      const body = await work.getDescription(workItem)
+      const result = upsertManagedSection(body, content)
+      if (!result.applied) {
+        await work.comment(workItem, {
+          body: `Overture could not update the managed section: ${result.reason}`,
+        })
+        return { applied: false, reason: result.reason ?? 'unknown' }
+      }
+      await work.updateDescription(workItem, result.body)
+      return { applied: true }
+    },
+  }
+}
+
 /** `work.transition` — move the work item to a new state. */
 function workTransitionAction(context: RunActionContext): WorkflowAction {
   return {
@@ -150,6 +214,8 @@ function defaultPullRequestBody(context: RunActionContext): string {
 
 export const builtinActionFactory: WorkflowActionFactory = (context) => [
   assertAction(),
+  workCreateItemAction(context),
+  workUpdateSectionAction(context),
   commitAction(context),
   pushAction(context),
   pullRequestAction(context),
