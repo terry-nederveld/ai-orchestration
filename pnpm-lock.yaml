@@ -279,6 +279,9 @@ importers:
       '@overture/core':
         specifier: workspace:*
         version: link:../core
+      '@overture/experiments':
+        specifier: workspace:*
+        version: link:../experiments
       '@overture/tools':
         specifier: workspace:*
         version: link:../tools

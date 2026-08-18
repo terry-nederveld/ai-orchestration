@@ -152,17 +152,31 @@ export function parseStructuredOutputs(
   return undefined
 }
 
-export function createGraphNodeExecutors(deps: GraphExecutorDeps): GraphNodeExecutors {
-  const runAgent = async (
+export interface ProfileAgentRunOptions {
+  readonly context?: string
+  readonly toolNames?: readonly string[]
+  readonly maxTurns?: number
+  readonly timeoutMs?: number
+  readonly role?: string
+}
+
+export type ProfileAgentRunner = (
+  profileName: string | undefined,
+  goal: string,
+  options?: ProfileAgentRunOptions,
+) => Promise<{ outcome: string; summary: string }>
+
+/**
+ * Profile-driven agent execution shared by agent nodes, gates, and the
+ * experiment stepper: snapshot-pinned profile resolution plus the
+ * deterministic fallback chain (outage-only by default, any-failure when
+ * the profile opts in).
+ */
+export function createProfileAgentRunner(deps: GraphExecutorDeps): ProfileAgentRunner {
+  return async (
     profileName: string | undefined,
     goal: string,
-    options: {
-      readonly context?: string
-      readonly toolNames?: readonly string[]
-      readonly maxTurns?: number
-      readonly timeoutMs?: number
-      readonly role?: string
-    } = {},
+    options: ProfileAgentRunOptions = {},
   ): Promise<{ outcome: string; summary: string }> => {
     const effectiveProfile = profileName ?? deps.graph.defaultProfile?.name
     if (!effectiveProfile) {
@@ -249,6 +263,10 @@ export function createGraphNodeExecutors(deps: GraphExecutorDeps): GraphNodeExec
       ? lastError
       : new OrchestratorError('all executors in the fallback chain failed', 'provider-outage')
   }
+}
+
+export function createGraphNodeExecutors(deps: GraphExecutorDeps): GraphNodeExecutors {
+  const runAgent = createProfileAgentRunner(deps)
 
   const agent: GraphNodeExecutor = async (node, context) => {
     if (node.config.kind !== 'agent') throw new Error('expected agent node')
@@ -537,10 +555,14 @@ export function createGraphNodeExecutors(deps: GraphExecutorDeps): GraphNodeExec
         error: `rubric '${rubricName}' not in snapshot`,
       }
     }
+    const fromDomain = context.domain.data['hypothesis']
+    const fromVariables = context.variables['hypothesis']
     const hypothesis =
-      typeof context.variables['hypothesis'] === 'string'
-        ? (context.variables['hypothesis'] as string)
-        : deps.item.title
+      typeof fromDomain === 'string'
+        ? fromDomain
+        : typeof fromVariables === 'string'
+          ? fromVariables
+          : deps.item.title
     return deps.experiments.step({
       runId: String(deps.run.id),
       nodeId: node.id,

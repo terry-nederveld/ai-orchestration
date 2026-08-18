@@ -55,6 +55,7 @@ import {
   createGraphNodeExecutors,
   type ExecutorResolver,
   type ExperimentStepper,
+  type GraphExecutorDeps,
 } from './node-executors.js'
 import { SnapshotResolver } from './snapshot.js'
 
@@ -84,7 +85,11 @@ export interface GraphCoordinatorOptions {
   readonly actions: WorkflowActionRegistry
   readonly specBuilder: SpecBuilder
   readonly checkpoints?: CheckpointSelector
-  readonly experiments?: ExperimentStepper
+  /**
+   * Built per run so the stepper's agents execute through the run's own
+   * profile resolution and fallback chain (see createProfileExperimentAgents).
+   */
+  readonly experiments?: (deps: GraphExecutorDeps) => ExperimentStepper
   readonly buildAgentContext?: (item: WorkItem, spec: ExecutionSpecification) => Promise<string>
   readonly events: EventBus
   readonly clock: Clock
@@ -390,7 +395,7 @@ export class GraphRunCoordinator {
         : defaultAgentContext(item)
 
       const childRunner = this.createChildRunner(item)
-      const executors = createGraphNodeExecutors({
+      const executorDeps: GraphExecutorDeps = {
         run,
         item,
         snapshot,
@@ -408,7 +413,6 @@ export class GraphRunCoordinator {
           logger: this.options.logger,
         }),
         childRunner,
-        ...(this.options.experiments ? { experiments: this.options.experiments } : {}),
         ...(workspace ? { workspace } : {}),
         agentContext,
         events: this.options.events,
@@ -416,6 +420,12 @@ export class GraphRunCoordinator {
         ids: this.options.ids,
         logger: this.options.logger,
         signal: abort.signal,
+      }
+      const executors = createGraphNodeExecutors({
+        ...executorDeps,
+        ...(this.options.experiments
+          ? { experiments: this.options.experiments(executorDeps) }
+          : {}),
       })
 
       const outcome = await this.engine.tick({
