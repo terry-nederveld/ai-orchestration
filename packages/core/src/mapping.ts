@@ -10,6 +10,9 @@ import type { RepositoryReference, WorkItem } from './work.js'
 
 export type MappingConditionOperator = 'equals' | 'in' | 'contains' | 'regex'
 
+/** ReDoS guard: `regex` conditions skip values longer than this. */
+const REGEX_VALUE_MAX = 8192
+
 export interface MappingCondition {
   /**
    * Dotted field path over the work item: `provider`, `type`, `state`,
@@ -87,7 +90,10 @@ function evaluateCondition(
       } catch {
         return false
       }
-      return values.some((value) => pattern.test(value))
+      // Cap tested value length: the matched values are attacker-controlled
+      // work-item fields, and an operator's catastrophic-backtracking
+      // pattern against a very long value would hang the evaluator (ReDoS).
+      return values.some((value) => value.length <= REGEX_VALUE_MAX && pattern.test(value))
     }
   }
 }

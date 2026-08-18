@@ -139,6 +139,25 @@ describe('managed work-item section', () => {
     expect(result.applied).toBe(false)
     expect(result.body).toBe(damaged)
   })
+
+  it('refuses an injected duplicate begin marker (would delete human content)', () => {
+    const legit = upsertManagedSection('Human intro.', 'v1').body
+    // A third party injects an extra begin marker above the real section.
+    const tampered = `${MANAGED_SECTION_BEGIN}\nvaluable human notes\n${legit}`
+    const result = upsertManagedSection(tampered, 'v2')
+    expect(result.applied).toBe(false)
+    expect(result.reason).toContain('duplicated')
+    expect(result.body).toBe(tampered) // untouched — nothing deleted
+    expect(result.body).toContain('valuable human notes')
+  })
+
+  it('refuses a duplicated end marker', () => {
+    const legit = upsertManagedSection('Intro.', 'v1').body
+    const tampered = `${legit}\n${MANAGED_SECTION_END}`
+    const result = upsertManagedSection(tampered, 'v2')
+    expect(result.applied).toBe(false)
+    expect(result.reason).toContain('duplicated')
+  })
 })
 
 describe('mapping rules', () => {

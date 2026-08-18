@@ -64,9 +64,13 @@ export const MANAGED_SECTION_END = '<!-- overture:managed:end -->'
 
 /**
  * Replace (or append) the managed section of a work-item body, preserving
- * every character of human content outside the delimiters. A body whose
- * delimiters were tampered with (one marker missing) is left untouched
- * and reported, never overwritten.
+ * every character of human content outside the delimiters. Work-item bodies
+ * are untrusted (third parties can edit them), so a body whose delimiters
+ * were tampered with — a missing marker, a reversed pair, OR a DUPLICATE of
+ * either marker — is left untouched and reported, never overwritten.
+ * Duplicate detection matters: an injected extra begin-marker above the
+ * real section would otherwise let a splice silently delete the human
+ * content between the injected and real markers.
  */
 export function upsertManagedSection(
   body: string,
@@ -85,6 +89,16 @@ export function upsertManagedSection(
       body,
       applied: false,
       reason: 'managed-section delimiters are damaged; refusing to modify the body',
+    }
+  }
+  if (
+    body.indexOf(MANAGED_SECTION_BEGIN) !== body.lastIndexOf(MANAGED_SECTION_BEGIN) ||
+    body.indexOf(MANAGED_SECTION_END) !== body.lastIndexOf(MANAGED_SECTION_END)
+  ) {
+    return {
+      body,
+      applied: false,
+      reason: 'managed-section delimiters are duplicated; refusing to modify the body',
     }
   }
   const before = body.slice(0, begin)
