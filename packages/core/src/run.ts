@@ -13,6 +13,7 @@ export const RunState = {
   Queued: 'QUEUED',
   Preparing: 'PREPARING',
   Running: 'RUNNING',
+  Waiting: 'WAITING',
   WaitingForTool: 'WAITING_FOR_TOOL',
   WaitingForSubagent: 'WAITING_FOR_SUBAGENT',
   WaitingForHuman: 'WAITING_FOR_HUMAN',
@@ -34,6 +35,7 @@ export const TERMINAL_RUN_STATES: readonly RunState[] = [
 
 const ACTIVE: readonly RunState[] = [
   RunState.Running,
+  RunState.Waiting,
   RunState.WaitingForTool,
   RunState.WaitingForSubagent,
   RunState.WaitingForHuman,
@@ -44,6 +46,7 @@ const RUN_TRANSITIONS: Readonly<Record<RunState, readonly RunState[]>> = {
   [RunState.Queued]: [RunState.Preparing, RunState.Cancelled, RunState.Failed],
   [RunState.Preparing]: [RunState.Running, RunState.Failed, RunState.Cancelled],
   [RunState.Running]: [
+    RunState.Waiting,
     RunState.WaitingForTool,
     RunState.WaitingForSubagent,
     RunState.WaitingForHuman,
@@ -53,9 +56,21 @@ const RUN_TRANSITIONS: Readonly<Record<RunState, readonly RunState[]>> = {
     RunState.Blocked,
     RunState.Cancelled,
   ],
+  [RunState.Waiting]: [
+    RunState.Running,
+    RunState.WaitingForHuman,
+    RunState.Blocked,
+    RunState.Failed,
+    RunState.Cancelled,
+  ],
   [RunState.WaitingForTool]: [RunState.Running, RunState.Failed, RunState.Cancelled],
   [RunState.WaitingForSubagent]: [RunState.Running, RunState.Failed, RunState.Cancelled],
-  [RunState.WaitingForHuman]: [RunState.Running, RunState.Blocked, RunState.Cancelled],
+  [RunState.WaitingForHuman]: [
+    RunState.Running,
+    RunState.Waiting,
+    RunState.Blocked,
+    RunState.Cancelled,
+  ],
   [RunState.Verifying]: [RunState.Running, RunState.Completed, RunState.Failed, RunState.Cancelled],
   [RunState.Completed]: [],
   [RunState.Failed]: [RunState.Queued],

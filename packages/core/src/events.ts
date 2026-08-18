@@ -79,6 +79,95 @@ export type OrchestratorEventPayload =
       readonly approved: boolean
     }
   | { readonly type: 'error'; readonly scope: string; readonly message: string }
+  | {
+      readonly type: 'wait.opened'
+      readonly runId: RunId
+      readonly waitId: string
+      readonly waitKind: string
+      readonly nodeId: string
+    }
+  | {
+      readonly type: 'wait.satisfied'
+      readonly runId: RunId
+      readonly waitId: string
+      readonly waitKind: string
+    }
+  | {
+      readonly type: 'human_input.requested'
+      readonly runId: RunId
+      readonly waitId: string
+      readonly inputType: string
+      readonly prompt: string
+      readonly surface: string
+    }
+  | {
+      readonly type: 'human_input.received'
+      readonly runId: RunId
+      readonly waitId: string
+      readonly responder: string
+      readonly channel: string
+    }
+  | {
+      readonly type: 'checkpoint.created'
+      readonly runId: RunId
+      readonly checkpointId: string
+      readonly strategy: string
+      readonly summary: string
+    }
+  | {
+      readonly type: 'spec.revised'
+      readonly runId: RunId
+      readonly revision: number
+      readonly reason: string
+    }
+  | {
+      readonly type: 'node.settled'
+      readonly runId: RunId
+      readonly nodeId: string
+      readonly status: string
+      readonly attempt: number
+    }
+  | {
+      readonly type: 'transition.taken'
+      readonly runId: RunId
+      readonly transitionId: string
+      readonly from: string
+      readonly to: string
+    }
+  | {
+      readonly type: 'domain_state.changed'
+      readonly runId: RunId
+      readonly state: string
+    }
+  | {
+      readonly type: 'experiment.updated'
+      readonly runId: RunId
+      readonly experimentId: string
+      readonly status: string
+      readonly iteration: number
+    }
+  | {
+      readonly type: 'judgment.requested'
+      readonly runId: RunId
+      readonly experimentId: string
+    }
+  | {
+      readonly type: 'judgment.decided'
+      readonly runId: RunId
+      readonly experimentId: string
+      readonly decision: string
+    }
+  | {
+      readonly type: 'gate.evaluated'
+      readonly runId: RunId
+      readonly gateSet: string
+      readonly passed: boolean
+    }
+  | {
+      readonly type: 'routing.selection_required'
+      readonly workItemId: string
+      readonly candidates: readonly string[]
+    }
 
 export type OrchestratorEvent = BaseEvent & OrchestratorEventPayload
 export type OrchestratorEventType = OrchestratorEventPayload['type']
