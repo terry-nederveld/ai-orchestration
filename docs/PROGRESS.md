@@ -12,9 +12,47 @@ commits/PRs. CLI binary: `overture`. Repo-level workflow file:
 
 ## Current Objective
 
-v1 DELIVERED. Final independent review's blocking finding remediated,
-AgentProvider contract suite added, clean-checkout validation green
-(1,311 tests). See docs/DELIVERY.md for the delivery report.
+PHASE 2 in progress: durable general-purpose work orchestration —
+graph workflows with separated state layers, version pinning, durable
+waits/human input, execution specifications, checkpoint strategies,
+repo mapping, instruction/context resolution, DoR/DoD gates, agent
+profiles, experimentation/rubrics/judgment, lanes/scheduling,
+templates/Evaluate, ambiguous routing, federated desktop, work-centric
+run UX, and the workflow designer. v1 delivery report: docs/DELIVERY.md.
+
+## Phase 2 Gap Map (requirement → current v1 state → change)
+
+- Workflow graph + 4 state layers → v1 is an in-memory DAG engine, not
+  resumable mid-run; RunState only → new graph model in core (nodes +
+  declared transitions + joins + bounded loops), durable tick-based
+  GraphEngine; engine lifecycle vs domain state vs external projection
+  separated; v1 step-DAG YAML compiles into the graph (no rewrite).
+- Versioning/pinning → definitions unversioned → content-addressed
+  DefinitionVersion store + immutable per-run ResolvedSnapshot.
+- Durable waits/human input → approvals in-memory fail-closed; restart
+  recovery marks runs Failed → persisted WaitCondition + HumanInput
+  (typed, first-response-wins), checkpointed resume across restarts.
+- ExecutionSpecification → none → revisioned immutable spec entity.
+- Checkpoints → workspace retention only → git remote branch checkpoint
+  strategy for coding; managed work-item section for non-code.
+- Repository mapping → adapter-supplied single repo → declarative
+  many-to-many rules with precedence + agent-assisted fallback.
+- Instruction discovery → none → InstructionProvider chain (CLAUDE.md,
+  AGENTS.md, AGENT.md, copilot-instructions) with provenance.
+- Context resolution → title/desc/labels + step summaries only →
+  composable ContextResolver, 1-up/1-down defaults, opt-in attachments.
+- DoR/DoD → none → versioned gate sets, remediation ≠ evaluation.
+- Profiles/fallback → routing profiles (executor+model) only →
+  versioned composable profiles + deterministic fallback chains.
+- Experiments/rubrics/judgment → none → new primitives.
+- Fan-out/fan-in → implicit all-join only → all/any/N/named joins.
+- Lanes/backlog policies/recurrence → single scheduler loop → lanes,
+  rank-preserving consumption policies, cron triggers.
+- Templates/Evaluate/routing → first-match auto-run → catalog,
+  side-effect-free Evaluate, WORKFLOW_SELECTION_REQUIRED + suggestion
+  learning (approval-gated rules).
+- Desktop → single runtime, dashboard-first → federated multi-runtime
+  connections, work-centric newest-first run UX, designer.
 
 ## Completed Milestones
 
