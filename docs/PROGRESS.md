@@ -60,20 +60,34 @@ run UX, and the workflow designer. v1 delivery report: docs/DELIVERY.md.
   versioning/snapshots, durable waits + typed human input, execution
   specs, checkpoints + managed sections, mapping rules, instruction/
   context contracts, gates, profiles, experiments/rubrics/judgment,
-  lanes/schedules; 41 tests); durable GraphEngine (tick-based, joins,
-  bounded loops, guards, effects, serialization-proven waits; 15 tests);
-  GraphRunCoordinator (snapshot pinning, durable suspension with
-  checkpoints, first-response-wins, spec revisioning on resume, timer
-  scans, child runs, human gates; 16 tests). ADRs 0017–0020.
-- In flight (agents): phase-2 persistence repositories (SQLite +
-  in-memory; in-memory already validated by coordinator tests),
-  resolution package (instructions/context), checkpoints package
-  (git-branch + work-item-section strategies, WorkProvider body access),
-  v1→graph compiler, experiments engine, agent-UX research.
-- Next: flagship Delivery + Discovery templates, lanes/scheduling/
-  recurrence, routing (selection-required + suggestions), server
-  endpoints for waits/definitions/runs-graph, desktop federation +
-  work-centric UX + designer, acceptance scenarios A/B, reviews.
+  lanes/schedules); durable GraphEngine (tick-based, joins, bounded
+  loops, guards, effects, serialization-proven waits); GraphRunCoordinator
+  (snapshot pinning, durable suspension with checkpoints,
+  first-response-wins, spec revisioning on resume, timer scans, child
+  runs, human gates); phase-2 persistence (SQLite + in-memory, migrations
+  7–13); resolution (convention instructions, relationship context);
+  checkpoints (git-branch WIP commits, work-item managed section);
+  v1→graph compiler (benign-skip channels preserve v1 semantics);
+  experiments engine (resumable reducer, rubric kill criteria, bounded
+  iteration) + orchestrator stepper (judgment as durable single-choice
+  wait, persisted JudgmentOutcomes); work-item creation/linking across
+  GitHub/Jira/Linear + testkit contract coverage; flagship templates
+  (Autonomous Delivery, Autonomous Discovery + story child workflow,
+  catalog with idempotent install + capability validation, default
+  profiles); DefaultSpecBuilder (mapping rules + instruction discovery
+  with provenance); mapping config schema; acceptance scenarios A and B
+  green end-to-end through the coordinator with scripted executors,
+  including coordinator destruction between suspension and resume.
+  ADRs 0017–0020.
+- In flight (agents): graph scheduler (lanes, cron, ambiguous routing +
+  approval-gated rule suggestions), server/CLI control-plane endpoints
+  (waits, definitions, graph-run views), side-effect-free Evaluate,
+  ADRs 0021–0026.
+- Next: daemon assembly wiring for the graph runtime (coordinator,
+  checkpoint selector, spec builder, experiments, template install),
+  desktop federation + work-centric newest-first UX + designer,
+  release lifecycle + recurring weekly-support-loop example,
+  independent architecture + security reviews, final validation (§40).
 
 ## Completed Milestones
 
