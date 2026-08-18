@@ -92,6 +92,23 @@ export function validateGraph(graph: WorkflowGraph): readonly GraphIssue[] {
     }
   }
 
+  // Join rule: 'all'/'min' joins are forbidden inside cycles (activation
+  // counting would be ambiguous across loop rounds).
+  for (const node of graph.nodes) {
+    const inCycle = (outgoing.get(node.id) ?? []).some((next) =>
+      reachesBack(next, node.id, outgoing),
+    )
+    if (node.join && node.join.mode !== 'any' && inCycle) {
+      issues.push({
+        path: `nodes.${node.id}`,
+        message: `'${node.join.mode}' join is not allowed on a node inside a cycle`,
+      })
+    }
+    if (node.join?.mode === 'min' && (node.join.n === undefined || node.join.n < 1)) {
+      issues.push({ path: `nodes.${node.id}`, message: "'min' join requires n >= 1" })
+    }
+  }
+
   // Bounded-cycle rule: every transition on a cycle needs a loopBound.
   for (const transition of graph.transitions) {
     if (transition.loopBound !== undefined) continue

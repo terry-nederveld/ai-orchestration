@@ -43,11 +43,15 @@ export interface RunGraphState {
   readonly snapshotId: string
   /** Nodes currently executing or waiting (at-most-once activation). */
   readonly activeNodeIds: readonly string[]
+  /** Subset of active nodes suspended on an open WaitCondition. */
+  readonly waitingNodeIds: readonly string[]
   /** Latest result per node (history preserved in `resultHistory`). */
   readonly nodeResults: Readonly<Record<string, GraphNodeResult>>
   readonly resultHistory: readonly GraphNodeResult[]
-  /** Transition id → traversal count (loop-bound enforcement). */
+  /** Transition id → firing count (loop bounds and join accounting). */
   readonly loopCounters: Readonly<Record<string, number>>
+  /** Node id → times activated (join accounting for multi-input nodes). */
+  readonly activations: Readonly<Record<string, number>>
   readonly domain: DomainState
   readonly fanOuts: Readonly<Record<string, FanOutState>>
   readonly variables: Readonly<Record<string, unknown>>
@@ -65,9 +69,11 @@ export function initialRunGraphState(
     runId,
     snapshotId,
     activeNodeIds: [],
+    waitingNodeIds: [],
     nodeResults: {},
     resultHistory: [],
     loopCounters: {},
+    activations: {},
     domain: { data: {} },
     fanOuts: {},
     variables,

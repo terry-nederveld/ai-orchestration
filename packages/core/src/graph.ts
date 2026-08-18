@@ -144,6 +144,13 @@ export interface LifecycleEffect {
 export interface GraphNode {
   readonly id: string
   readonly config: GraphNodeConfig
+  /**
+   * Activation semantics for nodes with multiple incoming transitions:
+   * 'any' (default) activates on the first firing; 'all' waits for every
+   * incoming transition to fire; 'min' waits for `join.n`. Validation
+   * forbids 'all'/'min' joins on nodes inside cycles.
+   */
+  readonly join?: JoinSpec
   /** Guard expressions; all must be true or the node fails pre-execution. */
   readonly guards?: readonly string[]
   readonly onEnter?: LifecycleEffect

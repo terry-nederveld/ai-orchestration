@@ -108,4 +108,8 @@ export interface WorkProvider {
   comment(item: WorkItem, comment: WorkComment): Promise<void>
   transition(item: WorkItem, transition: WorkTransition): Promise<void>
   listStates(container?: string): Promise<readonly WorkStateInfo[]>
+  /** Fetch the current full description/body (fresh, not cached). */
+  getDescription?(item: WorkItem): Promise<string>
+  /** Replace the full description/body. */
+  updateDescription?(item: WorkItem, description: string): Promise<void>
 }

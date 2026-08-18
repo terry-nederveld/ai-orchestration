@@ -4,10 +4,17 @@
  */
 
 import type { UsageRecord } from './budget.js'
+import type { CheckpointRepository } from './checkpoints.js'
+import type { DefinitionStore } from './definitions.js'
 import type { OrchestratorEvent } from './events.js'
+import type { ExecutionSpecRepository } from './execution-spec.js'
+import type { ExperimentRepository, JudgmentRepository } from './experiments.js'
 import type { RunId, SessionId, WorkItemId } from './ids.js'
+import type { ScheduleRepository } from './lanes.js'
 import type { Message } from './model.js'
 import type { Run } from './run.js'
+import type { RunGraphStateRepository } from './run-graph.js'
+import type { WaitRepository } from './waits.js'
 
 export interface RunRepository {
   save(run: Run): Promise<void>
@@ -78,6 +85,14 @@ export interface PersistenceProvider {
   readonly claims: ClaimStore
   readonly usage: UsageRepository
   readonly config: ConfigRepository
+  readonly definitions: DefinitionStore
+  readonly waits: WaitRepository
+  readonly runGraphs: RunGraphStateRepository
+  readonly specs: ExecutionSpecRepository
+  readonly checkpoints: CheckpointRepository
+  readonly experiments: ExperimentRepository
+  readonly judgments: JudgmentRepository
+  readonly schedules: ScheduleRepository
   /** Apply pending schema migrations. Idempotent. */
   migrate(): Promise<void>
   close(): Promise<void>
