@@ -69,6 +69,15 @@
       "path": "../providers/agent-copilot"
     },
     {
+      "path": "../resolution"
+    },
+    {
+      "path": "../checkpoints"
+    },
+    {
+      "path": "../templates"
+    },
+    {
       "path": "../extensions"
     }
   ],

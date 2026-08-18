@@ -97,6 +97,9 @@ importers:
       '@overture/agent-copilot':
         specifier: workspace:*
         version: link:../providers/agent-copilot
+      '@overture/checkpoints':
+        specifier: workspace:*
+        version: link:../checkpoints
       '@overture/config':
         specifier: workspace:*
         version: link:../config
@@ -121,6 +124,9 @@ importers:
       '@overture/policy':
         specifier: workspace:*
         version: link:../policy
+      '@overture/resolution':
+        specifier: workspace:*
+        version: link:../resolution
       '@overture/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -133,6 +139,9 @@ importers:
       '@overture/server':
         specifier: workspace:*
         version: link:../server
+      '@overture/templates':
+        specifier: workspace:*
+        version: link:../templates
       '@overture/tools':
         specifier: workspace:*
         version: link:../tools

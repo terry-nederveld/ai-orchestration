@@ -25,7 +25,11 @@ import {
 import {
   builtinActionFactory,
   DefaultCommandRunner,
+  DefaultSpecBuilder,
+  GraphRunCoordinator,
+  GraphScheduler,
   ProfileAgentRouter,
+  profileExperimentStepperFactory,
   RunCoordinator,
   Scheduler,
   WorkflowActionRegistry,
@@ -47,6 +51,12 @@ export interface AssembledDaemon {
   readonly service: OvertureService
   readonly config: OvertureConfig
   readonly secrets: SecretProvider
+  /**
+   * Durable graph runtime periodic work: recover interrupted runs once,
+   * then fire due schedule and wait timers each poll interval.
+   */
+  readonly graphTick: () => Promise<void>
+  readonly graphRecover: () => Promise<void>
 }
 
 class ConsoleLogger implements Logger {
@@ -503,6 +513,108 @@ export async function assembleDaemon(options: {
     maxConcurrentRuns: config.orchestrator.maxConcurrentRuns,
   })
 
+  // ----- durable graph runtime (phase 2) ---------------------------------
+  const { ConventionInstructionProvider } = await import('@overture/resolution')
+  const { GitBranchCheckpointStrategy, WorkItemSectionCheckpointStrategy } = await import(
+    '@overture/checkpoints'
+  )
+  const { installTemplates } = await import('@overture/templates')
+
+  // Idempotent (content-addressed); first install starts DRAFT, then is
+  // enabled once. An operator's later disable is never overridden.
+  const installed = await installTemplates(persistence.definitions)
+  for (const definition of installed) {
+    const lifecycle = await persistence.definitions.getLifecycle(definition.kind, definition.name)
+    if (lifecycle === 'draft') {
+      await persistence.definitions.setLifecycle(definition.kind, definition.name, 'enabled')
+    }
+  }
+
+  const specBuilder = new DefaultSpecBuilder({
+    clock,
+    mapping: {
+      name: 'config',
+      rules: config.mapping.rules.map((rule) => ({
+        id: rule.id,
+        priority: rule.priority,
+        when: rule.when as import('@overture/core').MappingPredicate,
+        repositories: rule.repositories.map((entry) => ({
+          repository: {
+            locator: entry.locator,
+            ...(entry.defaultBranch !== undefined ? { defaultBranch: entry.defaultBranch } : {}),
+            ...(entry.scmProviderId !== undefined ? { scmProviderId: entry.scmProviderId } : {}),
+          },
+          role: entry.role,
+        })),
+        ...(rule.onConflict !== undefined ? { onConflict: rule.onConflict } : {}),
+      })),
+    },
+    instructions: [new ConventionInstructionProvider()],
+  })
+
+  const gitCheckpoints = new GitBranchCheckpointStrategy({
+    scm: gitScm,
+    workspaces: { reposRoot, workspacesRoot, worktrees },
+    resolveRepository: async (runId) => {
+      const spec = await persistence.specs.latest(runId)
+      const primary =
+        spec?.repositories.find((entry) => entry.role === 'primary') ?? spec?.repositories[0]
+      return primary ? { locator: primary.repository.locator } : undefined
+    },
+    clock,
+  })
+  const sectionCheckpoints = new WorkItemSectionCheckpointStrategy({
+    resolveItem: async (workItemId) => {
+      const separator = workItemId.indexOf(':')
+      if (separator === -1) return undefined
+      const provider = byAdapterId.get(workItemId.slice(0, separator))
+      if (!provider) return undefined
+      const item = await provider.get(workItemId.slice(separator + 1)).catch(() => undefined)
+      return item ? { provider, item } : undefined
+    },
+    clock,
+  })
+
+  const graphCoordinator = new GraphRunCoordinator({
+    persistence,
+    work: { resolve: (providerId) => byAdapterId.get(providerId) },
+    workspaces: {
+      resolve: (strategy) =>
+        workspaceRegistry.has(strategy as never)
+          ? workspaceRegistry.resolve(strategy as never)
+          : undefined,
+    },
+    executors: { get: (id) => router.getExecutor(id) },
+    commands: new DefaultCommandRunner(),
+    actions,
+    specBuilder,
+    scm,
+    checkpoints: {
+      // Coding runs (a workspace exists) checkpoint to the run branch;
+      // everything else checkpoints into the work item's managed section.
+      select: (_run, workspace) => (workspace ? gitCheckpoints : sectionCheckpoints),
+    },
+    experiments: profileExperimentStepperFactory({
+      experiments: persistence.experiments,
+      judgments: persistence.judgments,
+    }),
+    events,
+    clock,
+    ids,
+    logger: logger.child({ component: 'graph' }),
+    claimant: config.orchestrator.claimant,
+    branchPrefix: config.orchestrator.branchPrefix,
+  })
+
+  const graphScheduler = new GraphScheduler({
+    persistence,
+    starter: graphCoordinator,
+    events,
+    clock,
+    ids,
+    logger: logger.child({ component: 'graph-scheduler' }),
+  })
+
   const service = new OvertureService({
     version: VERSION,
     redactEvent: (event) => redactor.redactObject(event),
@@ -511,6 +623,7 @@ export async function assembleDaemon(options: {
     events,
     scheduler,
     coordinator,
+    graphCoordinator,
     workflows,
     workProviders,
     modelProviders,
@@ -521,12 +634,24 @@ export async function assembleDaemon(options: {
     logger,
   })
 
-  return { service, config, secrets }
+  return {
+    service,
+    config,
+    secrets,
+    graphRecover: async () => graphCoordinator.recover(),
+    graphTick: async () => {
+      await graphCoordinator.fireDueTimers(clock.now())
+      await graphScheduler.fireDueSchedules(clock.now())
+    },
+  }
 }
 
 export async function runDaemon(args: readonly string[], stateDir: string): Promise<number> {
   const projectDir = process.cwd()
-  const { service, config } = await assembleDaemon({ stateDir, projectDir })
+  const { service, config, graphRecover, graphTick } = await assembleDaemon({
+    stateDir,
+    projectDir,
+  })
 
   const portFlagIndex = args.indexOf('--port')
   const port =
@@ -535,6 +660,14 @@ export async function runDaemon(args: readonly string[], stateDir: string): Prom
       : config.daemon.port
 
   await service.start()
+  await graphRecover().catch((error) => {
+    process.stderr.write(`graph recovery failed: ${String(error)}\n`)
+  })
+  const graphInterval = setInterval(() => {
+    void graphTick().catch((error) => {
+      process.stderr.write(`graph tick failed: ${String(error)}\n`)
+    })
+  }, config.orchestrator.pollIntervalMs)
   const handle = await startControlPlane(service, { host: config.daemon.host, port })
   await writeDaemonInfo(stateDir, {
     host: handle.host,
@@ -547,6 +680,7 @@ export async function runDaemon(args: readonly string[], stateDir: string): Prom
   await new Promise<void>((resolveShutdown) => {
     const shutdown = () => {
       process.stderr.write('shutting down…\n')
+      clearInterval(graphInterval)
       void (async () => {
         await service.cancelAllActive().catch(() => {})
         await handle.close().catch(() => {})
