@@ -54,6 +54,27 @@ run UX, and the workflow designer. v1 delivery report: docs/DELIVERY.md.
 - Desktop → single runtime, dashboard-first → federated multi-runtime
   connections, work-centric newest-first run UX, designer.
 
+## Phase 2 status
+
+- Committed: phase-2 core contracts (graph model + validation, definition
+  versioning/snapshots, durable waits + typed human input, execution
+  specs, checkpoints + managed sections, mapping rules, instruction/
+  context contracts, gates, profiles, experiments/rubrics/judgment,
+  lanes/schedules; 41 tests); durable GraphEngine (tick-based, joins,
+  bounded loops, guards, effects, serialization-proven waits; 15 tests);
+  GraphRunCoordinator (snapshot pinning, durable suspension with
+  checkpoints, first-response-wins, spec revisioning on resume, timer
+  scans, child runs, human gates; 16 tests). ADRs 0017–0020.
+- In flight (agents): phase-2 persistence repositories (SQLite +
+  in-memory; in-memory already validated by coordinator tests),
+  resolution package (instructions/context), checkpoints package
+  (git-branch + work-item-section strategies, WorkProvider body access),
+  v1→graph compiler, experiments engine, agent-UX research.
+- Next: flagship Delivery + Discovery templates, lanes/scheduling/
+  recurrence, routing (selection-required + suggestions), server
+  endpoints for waits/definitions/runs-graph, desktop federation +
+  work-centric UX + designer, acceptance scenarios A/B, reviews.
+
 ## Completed Milestones
 
 - 2026-08-14: Repository inspected (clean slate). Environment: macOS 26.6,
