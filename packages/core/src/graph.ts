@@ -199,6 +199,10 @@ export interface WorkflowGraph {
   readonly eligibility?: WorkflowEligibility
   readonly defaultProfile?: DefinitionRef
   readonly variables?: Readonly<Record<string, string>>
+  readonly workspace?: {
+    readonly strategy: string
+    readonly retention?: 'always' | 'on-failure' | 'never'
+  }
 }
 
 // ---------------------------------------------------------------------------
