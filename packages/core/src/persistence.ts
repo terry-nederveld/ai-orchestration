@@ -61,6 +61,8 @@ export interface ClaimStore {
   tryClaim(workItemId: WorkItemId, runId: RunId): Promise<boolean>
   release(workItemId: WorkItemId, runId: RunId): Promise<void>
   activeClaim(workItemId: WorkItemId): Promise<RunId | undefined>
+  /** All unreleased claims (orphan cleanup during recovery). */
+  listActive(): Promise<ReadonlyArray<{ readonly workItemId: WorkItemId; readonly runId: RunId }>>
 }
 
 export interface UsageRepository {

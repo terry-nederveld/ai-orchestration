@@ -158,6 +158,14 @@ class InMemoryClaimStore implements ClaimStore {
     const existing = this.claims.get(workItemId)
     return existing && !existing.releasedAt ? existing.runId : undefined
   }
+
+  async listActive(): Promise<
+    ReadonlyArray<{ readonly workItemId: WorkItemId; readonly runId: RunId }>
+  > {
+    return [...this.claims.entries()]
+      .filter(([, claim]) => !claim.releasedAt)
+      .map(([workItemId, claim]) => ({ workItemId, runId: claim.runId }))
+  }
 }
 
 interface StoredUsageRecord {
@@ -352,6 +360,13 @@ class InMemoryWaitRepository implements WaitRepository {
         this.conditions.set(id, { ...condition, status: 'cancelled' })
       }
     }
+  }
+
+  async listForRun(runId: RunId): Promise<readonly WaitCondition[]> {
+    return [...this.conditions.values()]
+      .filter((condition) => condition.runId === runId)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id))
+      .map((condition) => structuredClone(condition))
   }
 
   async addSupplemental(entry: SupplementalInput): Promise<void> {

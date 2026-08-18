@@ -52,4 +52,17 @@ export class SqliteClaimStore implements ClaimStore {
     )
     return row ? asId<'run'>(row.run_id) : undefined
   }
+
+  async listActive(): Promise<
+    ReadonlyArray<{ readonly workItemId: WorkItemId; readonly runId: RunId }>
+  > {
+    return this.db
+      .all<{ work_item_id: string; run_id: string }>(
+        'SELECT work_item_id, run_id FROM claims WHERE released_at IS NULL',
+      )
+      .map((row) => ({
+        workItemId: asId<'work-item'>(row.work_item_id),
+        runId: asId<'run'>(row.run_id),
+      }))
+  }
 }

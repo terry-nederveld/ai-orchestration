@@ -120,6 +120,8 @@ export interface WaitRepository {
     readonly kind?: WaitKind
     readonly dueBefore?: Date
   }): Promise<readonly WaitCondition[]>
+  /** Every condition for a run regardless of status (recovery reconciliation). */
+  listForRun(runId: RunId): Promise<readonly WaitCondition[]>
   /**
    * Atomically satisfy an open condition (first valid response wins).
    * Returns false when the condition was not open.

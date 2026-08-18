@@ -497,3 +497,90 @@ describe('GraphRunCoordinator durable suspension', () => {
     expect((await h.persistence.runs.get(runId))?.state).toBe(RunState.Completed)
   })
 })
+
+describe('GraphRunCoordinator crash-window recovery', () => {
+  it('recreates a lost wait condition for a waiting node with no durable row', async () => {
+    const h = await harness(askGraph)
+    const runId = asId<'run'>('run-RW')
+    const coordinator = h.makeCoordinator({ analyze: '{"assessed": true}' })
+    await coordinator.start(h.item, 'ask-flow', runId)
+
+    // Simulate the crash window: the waiting graph state persisted but the
+    // wait row never landed.
+    const open = await h.persistence.waits.listOpen({ runId })
+    for (const condition of open) {
+      await h.persistence.waits.save({ ...condition, status: 'cancelled' })
+    }
+    // Delete-equivalent: recovery must not treat cancelled rows as lost, so
+    // strip them entirely by replacing with an unrelated run's id.
+    const all = await h.persistence.waits.listForRun(runId)
+    for (const condition of all) {
+      await h.persistence.waits.save({ ...condition, runId: asId<'run'>('other-run') })
+    }
+    expect(await h.persistence.waits.listForRun(runId)).toHaveLength(0)
+
+    const recovered = h.makeCoordinator({ analyze: '{"assessed": true}' })
+    await recovered.recover()
+
+    // The wait exists again and the run can complete normally.
+    const reopened = await h.persistence.waits.listOpen({ runId })
+    expect(reopened).toHaveLength(1)
+    const done = h.makeCoordinator({ implement: '{"done": true}' })
+    const result = await done.satisfy(reopened[0]?.id ?? '', {
+      responder: 'terry',
+      channel: 'app',
+      value: 'postgres',
+    })
+    expect(result.accepted).toBe(true)
+    expect((await h.persistence.runs.get(runId))?.state).toBe(RunState.Completed)
+  })
+
+  it('replays a satisfied-but-unconsumed wait on recovery', async () => {
+    const h = await harness(askGraph)
+    const runId = asId<'run'>('run-RS')
+    const coordinator = h.makeCoordinator({ analyze: '{"assessed": true}' })
+    await coordinator.start(h.item, 'ask-flow', runId)
+    const open = await h.persistence.waits.listOpen({ runId })
+
+    // Simulate a crash right after the CAS: the wait is satisfied but the
+    // satisfaction was never delivered to the run.
+    const satisfied = await h.persistence.waits.trySatisfy(open[0]?.id ?? '', {
+      kind: 'human-input',
+      at: new Date(),
+      input: {
+        requestId: open[0]?.id ?? '',
+        responder: 'terry',
+        channel: 'app',
+        at: new Date(),
+        value: 'sqlite',
+      },
+    })
+    expect(satisfied).toBe(true)
+
+    const recovered = h.makeCoordinator({ implement: '{"done": true}' })
+    await recovered.recover()
+
+    const run = await h.persistence.runs.get(runId)
+    expect(run?.state).toBe(RunState.Completed)
+    const state = await h.persistence.runGraphs.get(runId)
+    expect(state?.nodeResults['ask']?.outputs['value']).toBe('sqlite')
+  })
+
+  it('cancelling a waiting run releases its claim and orphaned claims are recovered', async () => {
+    const h = await harness(askGraph)
+    const runId = asId<'run'>('run-RC')
+    await h.persistence.claims.tryClaim(h.item.id, runId)
+    const coordinator = h.makeCoordinator({ analyze: '{"assessed": true}' })
+    await coordinator.start(h.item, 'ask-flow', runId)
+
+    const cancelled = await coordinator.cancel(runId, 'operator cancelled')
+    expect(cancelled).toBe(true)
+    // The claim must be gone or the item is undispatchable forever.
+    expect(await h.persistence.claims.activeClaim(h.item.id)).toBeUndefined()
+
+    // Orphan cleanup: a claim whose run never came into existence.
+    await h.persistence.claims.tryClaim(h.item.id, asId<'run'>('run-VANISHED'))
+    await coordinator.recover()
+    expect(await h.persistence.claims.activeClaim(h.item.id)).toBeUndefined()
+  })
+})

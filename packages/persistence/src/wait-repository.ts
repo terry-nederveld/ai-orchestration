@@ -174,6 +174,15 @@ export class SqliteWaitRepository implements WaitRepository {
     )
   }
 
+  async listForRun(runId: RunId): Promise<readonly WaitCondition[]> {
+    return this.db
+      .all<WaitConditionRow>(
+        'SELECT * FROM wait_conditions WHERE run_id = ? ORDER BY created_at ASC, id ASC',
+        [runId],
+      )
+      .map(rowToCondition)
+  }
+
   async addSupplemental(entry: SupplementalInput): Promise<void> {
     this.db.run(
       'INSERT INTO supplemental_inputs (wait_id, run_id, input, promoted_at) VALUES (?, ?, ?, ?)',

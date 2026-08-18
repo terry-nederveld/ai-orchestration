@@ -38,6 +38,7 @@ import {
   findInSnapshot,
   InputValidationFailure,
   initialRunGraphState,
+  isTerminal,
   OrchestratorError,
   RunState,
   specsMateriallyDiffer,
@@ -75,6 +76,12 @@ export interface SpecBuilder {
 /** Selects the checkpoint strategy for a run (coding vs work-item). */
 export interface CheckpointSelector {
   select(run: Run, workspace: Workspace | undefined): CheckpointStrategy | undefined
+  /**
+   * Strategy lookup by id for RESTORE: at resume time no workspace exists
+   * yet, so the persisted checkpoint's own strategy id — not workspace
+   * presence — decides which strategy rehydrates it.
+   */
+  forStrategy?(id: string): CheckpointStrategy | undefined
 }
 
 export interface GraphCoordinatorOptions {
@@ -109,6 +116,8 @@ export class GraphRunCoordinator {
   private readonly engine = new GraphEngine()
   private readonly active = new Map<string, ActiveRun>()
   private readonly snapshots: SnapshotResolver
+  /** Per-run serialization: concurrent satisfactions/timers never clobber state. */
+  private readonly runLocks = new Map<string, Promise<unknown>>()
 
   constructor(private readonly options: GraphCoordinatorOptions) {
     this.snapshots = new SnapshotResolver(options.persistence.definitions, options.ids)
@@ -118,17 +127,34 @@ export class GraphRunCoordinator {
     return [...this.active.keys()]
   }
 
+  private async withRunLock<T>(runId: string, fn: () => Promise<T>): Promise<T> {
+    const prior = this.runLocks.get(runId) ?? Promise.resolve()
+    const chain = prior.then(fn, fn)
+    const guard = chain.then(
+      () => undefined,
+      () => undefined,
+    )
+    this.runLocks.set(runId, guard)
+    try {
+      return await chain
+    } finally {
+      if (this.runLocks.get(runId) === guard) this.runLocks.delete(runId)
+    }
+  }
+
   async cancel(runId: RunId, reason = 'cancelled'): Promise<boolean> {
     const active = this.active.get(String(runId))
     if (active) {
       active.abort.abort(new Error(reason))
       return true
     }
-    // A waiting run has no live execution; cancel durably.
+    // A waiting run has no live execution; cancel durably — including the
+    // claim, or the work item stays undispatchable forever.
     const run = await this.options.persistence.runs.get(runId)
     if (!run) return false
     if (run.state === RunState.Waiting || run.state === RunState.WaitingForHuman) {
       await this.options.persistence.waits.cancelForRun(runId)
+      await this.options.persistence.claims.release(run.workItemId, runId).catch(() => {})
       await this.transition(run, RunState.Cancelled, reason)
       return true
     }
@@ -147,45 +173,72 @@ export class GraphRunCoordinator {
   ): Promise<Run> {
     const snapshot = await this.snapshots.resolve(workflowName, options.workflowVersion)
     await this.options.persistence.definitions.saveSnapshot(snapshot)
-    const graph = this.graphFromSnapshot(snapshot)
-
-    let run: Run = {
-      id: runId,
-      workItemId: item.id,
-      workflowName: `${workflowName}@${snapshot.root.version}`,
-      state: RunState.Queued,
-      sessionIds: [],
-      createdAt: this.options.clock.now(),
-      updatedAt: this.options.clock.now(),
-      history: [],
+    const definition = findInSnapshot(
+      snapshot,
+      DefinitionKind.Workflow,
+      workflowName,
+      options.workflowVersion,
+    )
+    if (!definition) {
+      throw new OrchestratorError(`workflow '${workflowName}' not in snapshot`, 'internal')
     }
-    await this.options.persistence.runs.save(run)
-    run = await this.transition(run, RunState.Preparing)
+    return this.startResolved(item, definition, snapshot, runId, options.variables ?? {})
+  }
 
-    const workspace = await this.prepareWorkspace(item, graph, runId)
-    const spec = await this.options.specBuilder.build({
-      runId,
-      item,
-      snapshotId: snapshot.id,
-      revision: 1,
-      reason: 'initial',
-      ...(workspace ? { workspacePath: workspace.path } : {}),
+  /**
+   * Start a run against an already-resolved snapshot. Child runs come
+   * through here with their PARENT's snapshot so the entire pinned closure
+   * (gate sets, profiles, rubrics) is inherited — a child never re-resolves
+   * definitions that may have changed mid-flight.
+   */
+  private async startResolved(
+    item: WorkItem,
+    definition: { readonly name: string; readonly version: number },
+    snapshot: ResolvedSnapshot,
+    runId: RunId,
+    variables: Readonly<Record<string, unknown>>,
+  ): Promise<Run> {
+    return this.withRunLock(String(runId), async () => {
+      const graph = this.graphForName(snapshot, definition.name, definition.version)
+
+      let run: Run = {
+        id: runId,
+        workItemId: item.id,
+        workflowName: `${definition.name}@${definition.version}`,
+        state: RunState.Queued,
+        sessionIds: [],
+        createdAt: this.options.clock.now(),
+        updatedAt: this.options.clock.now(),
+        history: [],
+      }
+      await this.options.persistence.runs.save(run)
+      run = await this.transition(run, RunState.Preparing)
+
+      const workspace = await this.prepareWorkspace(item, graph, runId)
+      const spec = await this.options.specBuilder.build({
+        runId,
+        item,
+        snapshotId: snapshot.id,
+        revision: 1,
+        reason: 'initial',
+        ...(workspace ? { workspacePath: workspace.path } : {}),
+      })
+      await this.options.persistence.specs.save(spec)
+
+      const state = {
+        ...initialRunGraphState(runId, snapshot.id, {
+          ...graph.variables,
+          ...variables,
+          work_title: item.title,
+          work_id: item.externalId,
+        }),
+        updatedAt: this.options.clock.now(),
+      }
+      await this.options.persistence.runGraphs.save(state)
+
+      run = await this.transition(run, RunState.Running)
+      return this.drive(run, item, snapshot, graph, state, workspace, {})
     })
-    await this.options.persistence.specs.save(spec)
-
-    const state = {
-      ...initialRunGraphState(runId, snapshot.id, {
-        ...graph.variables,
-        ...options.variables,
-        work_title: item.title,
-        work_id: item.externalId,
-      }),
-      updatedAt: this.options.clock.now(),
-    }
-    await this.options.persistence.runGraphs.save(state)
-
-    run = await this.transition(run, RunState.Running)
-    return this.drive(run, item, snapshot, graph, state, workspace, {})
   }
 
   /**
@@ -296,20 +349,93 @@ export class GraphRunCoordinator {
   }
 
   /**
-   * Restart recovery: WAITING runs stay waiting (their conditions are
-   * durable); RUNNING/PREPARING runs are re-driven from persisted state.
+   * Restart recovery: RUNNING/PREPARING runs are re-driven from persisted
+   * state; WAITING runs are reconciled against their durable wait rows —
+   * a crash window can leave a waiting node with a missing condition
+   * (recreated by re-executing the node) or with a satisfied-but-never-
+   * consumed condition (its stored satisfaction is replayed). Unreleased
+   * claims whose runs are gone or terminal are released.
    */
   async recover(): Promise<void> {
     const runs = await this.options.persistence.runs.list()
     for (const run of runs) {
+      const runId = asId<'run'>(String(run.id))
       if (run.state === RunState.Running || run.state === RunState.Preparing) {
         this.options.logger.info('recovering interrupted graph run', { runId: String(run.id) })
-        await this.resumeRun(asId<'run'>(String(run.id)), {}).catch(async (error) => {
+        await this.resumeRun(runId, {}).catch((error) => {
           this.options.logger.error('recovery failed', {
             runId: String(run.id),
             error: error instanceof Error ? error.message : String(error),
           })
         })
+      } else if (run.state === RunState.Waiting || run.state === RunState.WaitingForHuman) {
+        await this.reconcileWaitingRun(runId).catch((error) => {
+          this.options.logger.error('wait reconciliation failed', {
+            runId: String(run.id),
+            error: error instanceof Error ? error.message : String(error),
+          })
+        })
+      }
+    }
+    await this.releaseOrphanedClaims()
+  }
+
+  private async reconcileWaitingRun(runId: RunId): Promise<void> {
+    const persistence = this.options.persistence
+    const state = await persistence.runGraphs.get(runId)
+    if (!state || state.waitingNodeIds.length === 0) return
+    const conditions = await persistence.waits.listForRun(runId)
+
+    const satisfactions: Record<string, WaitSatisfaction> = {}
+    const missing: string[] = []
+    for (const nodeId of state.waitingNodeIds) {
+      const rows = conditions.filter((condition) => condition.nodeId === nodeId)
+      if (rows.some((condition) => condition.status === 'open')) continue
+      const satisfied = rows
+        .filter((condition) => condition.status === 'satisfied' && condition.satisfaction)
+        .sort((a, b) => (b.satisfiedAt?.getTime() ?? 0) - (a.satisfiedAt?.getTime() ?? 0))[0]
+      if (satisfied?.satisfaction) {
+        satisfactions[nodeId] = satisfied.satisfaction
+      } else if (!rows.some((condition) => condition.status === 'cancelled')) {
+        missing.push(nodeId)
+      }
+    }
+    if (missing.length === 0 && Object.keys(satisfactions).length === 0) return
+
+    if (missing.length > 0) {
+      // No durable condition exists for these nodes (crash before the wait
+      // row landed): strip them so the engine re-executes the node and
+      // re-yields — and re-persists — its wait.
+      this.options.logger.warn('recreating lost wait conditions', {
+        runId: String(runId),
+        nodes: missing,
+      })
+      await persistence.runGraphs.save({
+        ...state,
+        waitingNodeIds: state.waitingNodeIds.filter((nodeId) => !missing.includes(nodeId)),
+        updatedAt: this.options.clock.now(),
+      })
+    }
+    if (Object.keys(satisfactions).length > 0) {
+      this.options.logger.info('replaying unconsumed wait satisfactions', {
+        runId: String(runId),
+        nodes: Object.keys(satisfactions),
+      })
+    }
+    await this.resumeRun(runId, satisfactions)
+  }
+
+  private async releaseOrphanedClaims(): Promise<void> {
+    const persistence = this.options.persistence
+    const claims = await persistence.claims.listActive().catch(() => [])
+    for (const claim of claims) {
+      const run = await persistence.runs.get(claim.runId)
+      if (!run || isTerminal(run.state)) {
+        this.options.logger.warn('releasing orphaned work-item claim', {
+          workItemId: String(claim.workItemId),
+          runId: String(claim.runId),
+        })
+        await persistence.claims.release(claim.workItemId, claim.runId).catch(() => {})
       }
     }
   }
@@ -324,6 +450,13 @@ export class GraphRunCoordinator {
     runId: RunId,
     satisfactions: Readonly<Record<string, WaitSatisfaction>>,
   ): Promise<void> {
+    return this.withRunLock(String(runId), () => this.resumeRunLocked(runId, satisfactions))
+  }
+
+  private async resumeRunLocked(
+    runId: RunId,
+    satisfactions: Readonly<Record<string, WaitSatisfaction>>,
+  ): Promise<void> {
     const persistence = this.options.persistence
     let run = await persistence.runs.get(runId)
     const state = await persistence.runGraphs.get(runId)
@@ -334,7 +467,7 @@ export class GraphRunCoordinator {
     if (!snapshot) {
       throw new OrchestratorError(`snapshot ${state.snapshotId} missing`, 'internal')
     }
-    const graph = this.graphFromSnapshot(snapshot)
+    const graph = this.graphForRun(run, snapshot)
 
     const work = this.options.work.resolve(this.providerIdOf(run.workItemId))
     if (!work) {
@@ -396,7 +529,7 @@ export class GraphRunCoordinator {
         ? await this.options.buildAgentContext(item, spec as ExecutionSpecification)
         : defaultAgentContext(item)
 
-      const childRunner = this.createChildRunner(item)
+      const childRunner = this.createChildRunner(item, snapshot)
       const executorDeps: GraphExecutorDeps = {
         run,
         item,
@@ -440,12 +573,20 @@ export class GraphRunCoordinator {
         signal: abort.signal,
         onEvent: (event) => this.publishEngineEvent(run.id, event),
       })
+      // Wait conditions land BEFORE the waiting graph state: a crash
+      // between the two then re-drives the run (state still shows the node
+      // active) instead of leaving a waiting node no one can ever satisfy.
+      // persistWaits dedupes against open conditions, so the opposite
+      // window (waits saved, state not) creates no duplicates on replay.
+      if (outcome.status === 'waiting') {
+        await this.persistWaits(run, item, graph, outcome)
+      }
       await persistence.runGraphs.save(outcome.state)
       await this.applyProjections(item, outcome.projections)
 
       switch (outcome.status) {
         case 'waiting':
-          return await this.suspend(run, item, graph, outcome, workspace)
+          return await this.suspend(run, item, outcome, workspace)
         case 'completed':
           return await this.finalize(run, item, RunState.Completed, outcome, workspace)
         case 'blocked':
@@ -459,6 +600,10 @@ export class GraphRunCoordinator {
       const message = error instanceof Error ? error.message : String(error)
       this.options.logger.error('graph run failed', { runId: String(run.id), error: message })
       this.publish(run.id, { type: 'error', scope: 'graph-run', message })
+      // A failed run is terminal: mirror finalize's cleanup so the work
+      // item's claim and open waits never leak.
+      await persistence.waits.cancelForRun(run.id).catch(() => {})
+      await persistence.claims.release(item.id, run.id).catch(() => {})
       const current = (await persistence.runs.get(run.id)) ?? run
       if (current.state !== RunState.Failed) {
         return this.transition(current, RunState.Failed, message).catch(() => current)
@@ -469,46 +614,22 @@ export class GraphRunCoordinator {
     }
   }
 
-  private async suspend(
+  /**
+   * Persist durable WaitConditions for the tick's pending waits. Runs
+   * BEFORE the waiting graph state is saved (see drive); idempotent
+   * against replays — a node with an open condition is never given a
+   * second one.
+   */
+  private async persistWaits(
     run: Run,
     item: WorkItem,
     graph: WorkflowGraph,
     outcome: GraphTickOutcome,
-    workspace: Workspace | undefined,
-  ): Promise<Run> {
+  ): Promise<void> {
     const persistence = this.options.persistence
-
-    // Durable checkpoint before releasing resources (ADR-0020).
-    const strategy = this.options.checkpoints?.select(run, workspace)
-    let checkpoint: Checkpoint | undefined
-    if (strategy) {
-      try {
-        checkpoint = await strategy.checkpoint({
-          runId: run.id,
-          nodeId: outcome.newWaits[0]?.nodeId ?? 'unknown',
-          specRevision: outcome.state.specRevision,
-          ...(workspace ? { workspacePath: workspace.path, branch: workspace.branch ?? '' } : {}),
-          workItemId: String(item.id),
-          summary: `waiting on ${outcome.newWaits.map((wait) => wait.spec.kind).join(', ') || 'open conditions'}`,
-        })
-        await persistence.checkpoints.save(checkpoint)
-        this.publish(run.id, {
-          type: 'checkpoint.created',
-          runId: run.id,
-          checkpointId: checkpoint.id,
-          strategy: strategy.id,
-          summary: checkpoint.summary,
-        })
-      } catch (error) {
-        this.options.logger.warn('checkpoint failed before suspension', {
-          runId: String(run.id),
-          error: error instanceof Error ? error.message : String(error),
-        })
-      }
-    }
-
-    let anyHuman = false
+    const openBefore = await persistence.waits.listOpen({ runId: run.id })
     for (const pending of outcome.newWaits) {
+      if (openBefore.some((condition) => condition.nodeId === pending.nodeId)) continue
       const dueAt = timeWaitDueAt(pending, this.options.clock.now())
       const condition: WaitCondition = {
         id: this.options.ids.next('wait'),
@@ -530,7 +651,6 @@ export class GraphRunCoordinator {
         nodeId: condition.nodeId,
       })
       if (pending.request) {
-        anyHuman = true
         this.publish(run.id, {
           type: 'human_input.requested',
           runId: run.id,
@@ -547,9 +667,57 @@ export class GraphRunCoordinator {
         }
       }
     }
+  }
+
+  private async suspend(
+    run: Run,
+    item: WorkItem,
+    outcome: GraphTickOutcome,
+    workspace: Workspace | undefined,
+  ): Promise<Run> {
+    const persistence = this.options.persistence
+
+    // Durable checkpoint before releasing resources (ADR-0020). A coding
+    // run (workspace present) REFUSES to suspend without one: losing the
+    // workspace with no durable checkpoint would strand the work.
+    const strategy = this.options.checkpoints?.select(run, workspace)
+    let checkpoint: Checkpoint | undefined
+    if (strategy) {
+      try {
+        checkpoint = await strategy.checkpoint({
+          runId: run.id,
+          nodeId: outcome.newWaits[0]?.nodeId ?? 'unknown',
+          specRevision: outcome.state.specRevision,
+          ...(workspace ? { workspacePath: workspace.path, branch: workspace.branch ?? '' } : {}),
+          workItemId: String(item.id),
+          summary: `waiting on ${outcome.newWaits.map((wait) => wait.spec.kind).join(', ') || 'open conditions'}`,
+        })
+        await persistence.checkpoints.save(checkpoint)
+        this.publish(run.id, {
+          type: 'checkpoint.created',
+          runId: run.id,
+          checkpointId: checkpoint.id,
+          strategy: strategy.id,
+          summary: checkpoint.summary,
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (workspace) {
+          throw new OrchestratorError(
+            `refusing to suspend a coding run without a durable checkpoint: ${message}`,
+            'internal',
+            { cause: error },
+          )
+        }
+        this.options.logger.warn('checkpoint failed before suspension', {
+          runId: String(run.id),
+          error: message,
+        })
+      }
+    }
 
     const open = await persistence.waits.listOpen({ runId: run.id })
-    const humanOpen = anyHuman || open.some((condition) => condition.request !== undefined)
+    const humanOpen = open.some((condition) => condition.request !== undefined)
     const target = humanOpen ? RunState.WaitingForHuman : RunState.Waiting
     return this.transition(run, target, 'durable wait')
   }
@@ -585,7 +753,7 @@ export class GraphRunCoordinator {
   }
 
   /** Child-run support for sub-workflow and fan-out nodes. */
-  private createChildRunner(parentItem: WorkItem): ChildRunner {
+  private createChildRunner(parentItem: WorkItem, parentSnapshot: ResolvedSnapshot): ChildRunner {
     return {
       start: async (options) => {
         const childRunId = asId<'run'>(
@@ -594,10 +762,16 @@ export class GraphRunCoordinator {
         const existing = await this.options.persistence.runs.get(childRunId)
         if (existing) return { childRunId: String(childRunId) }
         // Children execute detached; completion satisfies the parent wait.
-        void this.start(parentItem, options.workflowName, childRunId, {
-          variables: options.variables,
-          workflowVersion: options.workflowVersion,
-        }).catch((error) =>
+        // They inherit the PARENT's pinned snapshot — the whole closure of
+        // gate sets, profiles, and rubrics — so mid-flight definition
+        // edits are as invisible to children as to the parent (ADR-0018).
+        void this.startResolved(
+          parentItem,
+          { name: options.workflowName, version: options.workflowVersion },
+          parentSnapshot,
+          childRunId,
+          options.variables,
+        ).catch((error) =>
           this.options.logger.error('child run failed to start', {
             childRunId: String(childRunId),
             error: error instanceof Error ? error.message : String(error),
@@ -671,16 +845,32 @@ export class GraphRunCoordinator {
   // -----------------------------------------------------------------------
 
   private graphFromSnapshot(snapshot: ResolvedSnapshot): WorkflowGraph {
-    const definition = findInSnapshot(
-      snapshot,
-      DefinitionKind.Workflow,
-      snapshot.root.name,
-      snapshot.root.version,
-    )
+    return this.graphForName(snapshot, snapshot.root.name, snapshot.root.version)
+  }
+
+  private graphForName(snapshot: ResolvedSnapshot, name: string, version?: number): WorkflowGraph {
+    const definition = findInSnapshot(snapshot, DefinitionKind.Workflow, name, version)
     if (!definition) {
-      throw new OrchestratorError('snapshot is missing its root workflow', 'internal')
+      throw new OrchestratorError(`snapshot is missing workflow '${name}'`, 'internal')
     }
     return definition.document as unknown as WorkflowGraph
+  }
+
+  /**
+   * The graph a run executes: parsed from the run's pinned `name@version`
+   * so child runs sharing their parent's snapshot resolve their own
+   * workflow, not the snapshot root.
+   */
+  private graphForRun(run: Run, snapshot: ResolvedSnapshot): WorkflowGraph {
+    const at = run.workflowName.lastIndexOf('@')
+    if (at > 0) {
+      const name = run.workflowName.slice(0, at)
+      const version = Number(run.workflowName.slice(at + 1))
+      if (Number.isInteger(version) && version > 0) {
+        return this.graphForName(snapshot, name, version)
+      }
+    }
+    return this.graphFromSnapshot(snapshot)
   }
 
   private async prepareWorkspace(
@@ -720,7 +910,12 @@ export class GraphRunCoordinator {
   ): Promise<Workspace | undefined> {
     if (!graph.workspace?.strategy || graph.workspace.strategy === 'none') return undefined
     const checkpoint = await this.options.persistence.checkpoints.latestForRun(run.id)
-    const strategy = this.options.checkpoints?.select(run, undefined)
+    // The checkpoint's own strategy id decides how it restores; workspace
+    // presence is unknowable here (nothing is restored yet).
+    const strategy = checkpoint
+      ? (this.options.checkpoints?.forStrategy?.(checkpoint.strategy) ??
+        this.options.checkpoints?.select(run, undefined))
+      : undefined
     if (
       checkpoint &&
       strategy &&
