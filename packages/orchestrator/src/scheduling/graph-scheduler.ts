@@ -128,7 +128,8 @@ export class GraphScheduler {
     let halted: { item: WorkItem; reason: string } | undefined
 
     for (const item of candidates) {
-      if (active.length + started.length >= capacity) break
+      // `active` carries prior lane runs and grows with each start below.
+      if (active.length >= capacity) break
 
       let reason = (await this.isBlocked(item)) ? 'item is blocked' : undefined
       let workflow: string | undefined
@@ -385,10 +386,7 @@ export class GraphScheduler {
   }
 
   /** One open selection wait per item; re-routing reuses it. */
-  private async openSelectionWait(
-    item: WorkItem,
-    workflows: readonly string[],
-  ): Promise<string> {
+  private async openSelectionWait(item: WorkItem, workflows: readonly string[]): Promise<string> {
     const persistence = this.options.persistence
     const runId = asId<'run'>(`routing:${String(item.id)}`)
     const open = await persistence.waits.listOpen({ runId })
@@ -449,9 +447,7 @@ export class GraphScheduler {
   async suggestRules(): Promise<readonly RoutingRuleSuggestion[]> {
     const history = await this.listDecisions()
     const existing = new Set((await this.listRules()).map((rule) => rule.condition))
-    return suggestRoutingRules(history).filter(
-      (suggestion) => !existing.has(suggestion.condition),
-    )
+    return suggestRoutingRules(history).filter((suggestion) => !existing.has(suggestion.condition))
   }
 
   /** Open an approval wait for a suggestion. Only approval persists it. */
@@ -674,13 +670,18 @@ export function parseScheduleSpec(source: string): ScheduleSpec {
   const trimmed = source.trim()
   const interval = INTERVAL_PATTERN.exec(trimmed)
   if (interval) {
-    const everyMs = Number(interval[1]) * (INTERVAL_UNIT_MS[(interval[2] as string).toLowerCase()] as number)
-    if (everyMs <= 0) throw new OrchestratorError(`interval must be positive: '${source}'`, 'invalid-input')
+    const everyMs =
+      Number(interval[1]) * (INTERVAL_UNIT_MS[(interval[2] as string).toLowerCase()] as number)
+    if (everyMs <= 0)
+      throw new OrchestratorError(`interval must be positive: '${source}'`, 'invalid-input')
     return { kind: 'interval', everyMs }
   }
   const fields = trimmed.split(/\s+/)
   if (fields.length !== 5) {
-    throw new OrchestratorError(`expected 5 cron fields or an interval, got '${source}'`, 'invalid-input')
+    throw new OrchestratorError(
+      `expected 5 cron fields or an interval, got '${source}'`,
+      'invalid-input',
+    )
   }
   return {
     kind: 'cron',
@@ -717,7 +718,10 @@ function parseCronField(
       high = range.length > 1 ? (range[1] as number) : stepRaw !== undefined ? max : low
     }
     if (low < min || high > max || low > high) {
-      throw new OrchestratorError(`cron field '${source}' out of range ${min}-${max}`, 'invalid-input')
+      throw new OrchestratorError(
+        `cron field '${source}' out of range ${min}-${max}`,
+        'invalid-input',
+      )
     }
     for (let value = low; value <= high; value += step) values.add(normalize(value))
   }
