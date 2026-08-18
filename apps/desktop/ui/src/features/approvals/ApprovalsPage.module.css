@@ -1,0 +1,43 @@
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.waitList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.waitCard {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+}
+
+.waitCard.stale {
+  opacity: 0.55;
+}
+
+.waitHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.waitRun {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.sourceError {
+  padding: var(--space-3);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}

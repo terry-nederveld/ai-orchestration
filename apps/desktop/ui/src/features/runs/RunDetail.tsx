@@ -1,9 +1,9 @@
 import { type ReactNode, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
-import { useConnection } from '../../api/connection'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
+import { useConnections } from '../../api/connection'
 import { useEventStream } from '../../api/events'
 import { TERMINAL_RUN_STATES } from '../../api/types'
-import { useApiQuery } from '../../api/useApiQuery'
+import { useClientQuery } from '../../api/useApiQuery'
 import { StateBadge } from '../../components/Badge'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
@@ -14,6 +14,7 @@ import { Timeline } from '../../components/Timeline'
 import { useToast } from '../../components/Toast'
 import { describeEvent } from '../../lib/describeEvent'
 import { formatCost, formatTokens, relativeTime } from '../../lib/format'
+import { GraphRunDetail } from './GraphRunDetail'
 import styles from './RunDetail.module.css'
 import { reduceRunTimeline, type ToolCallEntry, type TranscriptEntry } from './timeline'
 
@@ -21,20 +22,35 @@ const RETRYABLE_STATES = new Set(['FAILED', 'BLOCKED', 'CANCELLED'])
 
 export function RunDetail(): JSX.Element {
   const { runId } = useParams<{ runId: string }>()
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { client } = useConnection()
+  const { connections } = useConnections()
   const { push } = useToast()
   const [tab, setTab] = useState<'overview' | 'events'>('overview')
   const [busy, setBusy] = useState<'cancel' | 'retry' | null>(null)
 
-  const runQuery = useApiQuery((c) => c.getRun(runId ?? ''), [runId])
-  const historyQuery = useApiQuery((c) => c.getRunEvents(runId ?? ''), [runId])
+  // The `conn` search param names the connection that owns this run
+  // (federated navigation always sets it); fall back to the primary one.
+  const connParam = searchParams.get('conn')
+  const runtime =
+    (connParam
+      ? connections.find((connection) => connection.entry.name === connParam)
+      : undefined) ??
+    connections.find((connection) => connection.health === 'connected') ??
+    connections[0]
+  const client = runtime?.client ?? null
+
+  const runQuery = useClientQuery(client, (c) => c.getRun(runId ?? ''), [runId])
+  const historyQuery = useClientQuery(client, (c) => c.getRunEvents(runId ?? ''), [runId])
+  const graphQuery = useClientQuery(client, (c) => c.getGraphRun(runId ?? ''), [runId])
 
   const { events: liveEvents } = useEventStream(runId, {
     maxEvents: 2000,
+    ...(runtime ? { connection: runtime.entry.name } : {}),
     onEvent: (event) => {
       if (event.type === 'run.state.changed' || event.type === 'workflow.transitioned') {
         runQuery.reload()
+        graphQuery.reload()
       }
     },
   })
@@ -80,7 +96,11 @@ export function RunDetail(): JSX.Element {
     try {
       const next = await client.retryRun(runId)
       push('Retry queued', 'success')
-      navigate(`/runs/${next.id}`)
+      navigate(
+        `/runs/${encodeURIComponent(next.id)}${
+          runtime ? `?conn=${encodeURIComponent(runtime.entry.name)}` : ''
+        }`,
+      )
     } catch (err) {
       push(err instanceof Error ? err.message : 'Failed to retry run', 'error')
     } finally {
@@ -88,8 +108,23 @@ export function RunDetail(): JSX.Element {
     }
   }
 
-  if (runQuery.loading && !run) {
+  if ((runQuery.loading || graphQuery.loading) && !run && !graphQuery.data) {
     return <Spinner />
+  }
+
+  // Durable graph runs branch to the work-centric graph view.
+  if (graphQuery.data && client) {
+    return (
+      <GraphRunDetail
+        view={graphQuery.data}
+        client={client}
+        {...(runtime ? { connectionName: runtime.entry.name } : {})}
+        onChanged={() => {
+          runQuery.reload()
+          graphQuery.reload()
+        }}
+      />
+    )
   }
 
   if (runQuery.error && !run) {

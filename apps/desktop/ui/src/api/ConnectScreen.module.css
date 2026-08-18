@@ -115,3 +115,71 @@
 .submit {
   margin-top: var(--space-2);
 }
+
+/* ----- connection manager ------------------------------------------------ */
+
+.managerCard {
+  width: 520px;
+}
+
+.connectionList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+
+.connectionRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.connectionDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.dotConnected {
+  background: var(--color-success);
+}
+
+.dotConnecting {
+  background: var(--color-warning);
+}
+
+.dotUnreachable {
+  background: var(--color-danger);
+}
+
+.connectionMeta {
+  flex: 1;
+  min-width: 0;
+}
+
+.connectionName {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.connectionAddress {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connectionStatusText {
+  font-size: 11px;
+  color: var(--color-text-faint);
+  text-align: right;
+  flex: none;
+}

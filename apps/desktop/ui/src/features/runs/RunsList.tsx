@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
+import { useFederatedQuery } from '../../api/federation'
 import type { Run, RunState } from '../../api/types'
 import { RunState as RunStateValues } from '../../api/types'
-import { useApiQuery } from '../../api/useApiQuery'
-import { StateBadge } from '../../components/Badge'
+import { Badge, StateBadge } from '../../components/Badge'
 import { Card } from '../../components/Card'
 import { EmptyState } from '../../components/EmptyState'
 import { Spinner } from '../../components/Spinner'
@@ -13,14 +13,32 @@ import styles from './RunsList.module.css'
 
 const ALL_STATES = Object.values(RunStateValues)
 
+interface RunRow {
+  readonly run: Run
+  readonly connection: string
+  readonly stale: boolean
+  readonly lastUpdatedAt: string | null
+}
+
 export function RunsList(): JSX.Element {
   const navigate = useNavigate()
   const [filter, setFilter] = useState<RunState | 'ALL'>('ALL')
-  const query = useApiQuery(
+  const query = useFederatedQuery(
+    `runs:${filter}`,
     (client) => client.listRuns({ limit: 200, ...(filter !== 'ALL' ? { states: [filter] } : {}) }),
     [filter],
   )
-  const runs = query.data ?? []
+
+  const rows: readonly RunRow[] = query.records
+    .flatMap((record) =>
+      (record.data ?? []).map((run) => ({
+        run,
+        connection: record.connection,
+        stale: record.stale,
+        lastUpdatedAt: record.lastUpdatedAt,
+      })),
+    )
+    .sort((a, b) => new Date(b.run.updatedAt).getTime() - new Date(a.run.updatedAt).getTime())
 
   return (
     <div>
@@ -45,13 +63,11 @@ export function RunsList(): JSX.Element {
       </div>
 
       <Card flush>
-        {query.loading ? (
+        {query.loading && rows.length === 0 ? (
           <div style={{ padding: 'var(--space-6)' }}>
             <Spinner />
           </div>
-        ) : query.error ? (
-          <EmptyState icon="!" title="Couldn't load runs" hint={query.error} />
-        ) : runs.length === 0 ? (
+        ) : rows.length === 0 ? (
           <EmptyState
             icon="▶"
             title={filter === 'ALL' ? 'No runs yet' : `No ${filter.toLowerCase()} runs`}
@@ -59,35 +75,56 @@ export function RunsList(): JSX.Element {
           />
         ) : (
           <Table
-            rows={runs}
-            rowKey={(run) => run.id}
-            onRowClick={(run) => navigate(`/runs/${run.id}`)}
+            rows={rows}
+            rowKey={(row) => `${row.connection}:${row.run.id}`}
+            onRowClick={(row) =>
+              navigate(
+                `/runs/${encodeURIComponent(row.run.id)}?conn=${encodeURIComponent(row.connection)}`,
+              )
+            }
             columns={[
               {
                 key: 'id',
                 header: 'Run',
-                render: (run: Run) => <span className="mono">{run.id}</span>,
+                render: (row: RunRow) => <span className="mono">{row.run.id}</span>,
               },
               {
                 key: 'workItem',
                 header: 'Work item',
-                render: (run: Run) => <span className="mono">{run.workItemId}</span>,
+                render: (row: RunRow) => <span className="mono">{row.run.workItemId}</span>,
               },
-              { key: 'workflow', header: 'Workflow', render: (run: Run) => run.workflowName },
+              {
+                key: 'workflow',
+                header: 'Workflow',
+                render: (row: RunRow) => row.run.workflowName,
+              },
+              {
+                key: 'connection',
+                header: 'Connection',
+                render: (row: RunRow) => (
+                  <>
+                    <Badge tone="neutral">{row.connection}</Badge>{' '}
+                    {row.stale && <Badge tone="warning">stale</Badge>}
+                  </>
+                ),
+              },
               {
                 key: 'state',
                 header: 'State',
-                render: (run: Run) => <StateBadge state={run.state} />,
+                render: (row: RunRow) => <StateBadge state={row.run.state} />,
               },
               {
                 key: 'created',
                 header: 'Created',
-                render: (run: Run) => relativeTime(run.createdAt),
+                render: (row: RunRow) => relativeTime(row.run.createdAt),
               },
               {
                 key: 'updated',
                 header: 'Updated',
-                render: (run: Run) => relativeTime(run.updatedAt),
+                render: (row: RunRow) =>
+                  row.stale && row.lastUpdatedAt
+                    ? `${relativeTime(row.run.updatedAt)} (seen ${relativeTime(row.lastUpdatedAt)})`
+                    : relativeTime(row.run.updatedAt),
               },
             ]}
           />

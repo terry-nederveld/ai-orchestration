@@ -3,7 +3,7 @@
  * exponential backoff (capped) when the connection drops.
  */
 import { useEffect, useRef, useState } from 'react'
-import { useConnection } from './connection'
+import { useConnections, useRuntimeConnection } from './connection'
 import type { OrchestratorEvent, OrchestratorEventType } from './types'
 
 const INITIAL_BACKOFF_MS = 1000
@@ -81,12 +81,21 @@ export function subscribeToEvents(
 
 const DEFAULT_MAX_EVENTS = 200
 
-/** Live event stream for the whole daemon, or scoped to a single run. */
+/**
+ * Live event stream for one runtime — the named connection, or the primary
+ * one when omitted — optionally scoped to a single run.
+ */
 export function useEventStream(
   runId?: string,
-  options?: { readonly maxEvents?: number; readonly onEvent?: (event: OrchestratorEvent) => void },
+  options?: {
+    readonly maxEvents?: number
+    readonly onEvent?: (event: OrchestratorEvent) => void
+    /** Stream from this named connection instead of the primary one. */
+    readonly connection?: string
+  },
 ): { readonly events: readonly OrchestratorEvent[]; readonly connected: boolean } {
-  const { client, status } = useConnection()
+  const runtime = useRuntimeConnection(options?.connection)
+  const client = runtime?.health === 'connected' ? runtime.client : null
   const [events, setEvents] = useState<readonly OrchestratorEvent[]>([])
   const [connected, setConnected] = useState(false)
   const onEventRef = useRef(options?.onEvent)
@@ -94,7 +103,8 @@ export function useEventStream(
   const maxEvents = options?.maxEvents ?? DEFAULT_MAX_EVENTS
 
   useEffect(() => {
-    if (status !== 'connected' || !client) return
+    // jsdom has no EventSource; tests exercise pages without live streams.
+    if (!client || typeof EventSource === 'undefined') return
     setEvents([])
     const url = client.eventsUrl(runId)
     const unsubscribe = subscribeToEvents(
@@ -110,7 +120,46 @@ export function useEventStream(
     )
     return unsubscribe
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, status, runId, maxEvents])
+  }, [client, runId, maxEvents])
 
   return { events, connected }
+}
+
+/**
+ * One SSE subscription per connected runtime (ADR-0025): each stream backs
+ * off independently and a dropped runtime never affects the others. Events
+ * are delivered to `onEvent` tagged with their source connection name.
+ */
+export function useFederatedEvents(
+  onEvent: (connection: string, event: OrchestratorEvent) => void,
+): void {
+  const { connections } = useConnections()
+  const onEventRef = useRef(onEvent)
+  onEventRef.current = onEvent
+
+  const signature = connections
+    .map(
+      (connection) => `${connection.entry.name}:${connection.health}:${connection.client.baseUrl}`,
+    )
+    .join('|')
+  const connectionsRef = useRef(connections)
+  connectionsRef.current = connections
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `signature` stands in for the connections array.
+  useEffect(() => {
+    // jsdom has no EventSource; tests exercise pages without live streams.
+    if (typeof EventSource === 'undefined') return
+    const unsubscribers = connectionsRef.current
+      .filter((connection) => connection.health === 'connected')
+      .map((connection) =>
+        subscribeToEvents(
+          connection.client.eventsUrl(),
+          (event) => onEventRef.current(connection.entry.name, event),
+          () => {},
+        ),
+      )
+    return () => {
+      for (const unsubscribe of unsubscribers) unsubscribe()
+    }
+  }, [signature])
 }

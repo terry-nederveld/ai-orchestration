@@ -10,15 +10,15 @@ export interface ApiQueryResult<T> {
 }
 
 /**
- * Fetches data from the connected daemon and re-fetches whenever `deps`
- * change or `reload()` is called. Shared by every feature page so loading /
- * error / empty handling is consistent app-wide.
+ * Fetches data from an explicit client (a specific runtime connection) and
+ * re-fetches whenever `deps` change or `reload()` is called. Pass null while
+ * no client is ready; the query stays in its loading state.
  */
-export function useApiQuery<T>(
+export function useClientQuery<T>(
+  client: ApiClient | null,
   fetcher: (client: ApiClient) => Promise<T>,
   deps: readonly unknown[] = [],
 ): ApiQueryResult<T> {
-  const { client, status: connectionStatus } = useConnection()
   const [data, setData] = useState<T | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -32,7 +32,7 @@ export function useApiQuery<T>(
   // reload() forces this effect to re-run.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
-    if (!client || connectionStatus !== 'connected') return
+    if (!client) return
     let cancelled = false
     setLoading(true)
     fetcherRef
@@ -52,7 +52,19 @@ export function useApiQuery<T>(
     return () => {
       cancelled = true
     }
-  }, [client, connectionStatus, generation, ...deps])
+  }, [client, generation, ...deps])
 
   return { data, error, loading, reload }
+}
+
+/**
+ * Fetches data from the primary connected daemon. Shared by every feature
+ * page so loading / error / empty handling is consistent app-wide.
+ */
+export function useApiQuery<T>(
+  fetcher: (client: ApiClient) => Promise<T>,
+  deps: readonly unknown[] = [],
+): ApiQueryResult<T> {
+  const { client, status: connectionStatus } = useConnection()
+  return useClientQuery(connectionStatus === 'connected' ? client : null, fetcher, deps)
 }

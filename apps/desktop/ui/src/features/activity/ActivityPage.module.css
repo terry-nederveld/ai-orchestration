@@ -1,0 +1,97 @@
+.feed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.group {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  overflow: hidden;
+}
+
+.groupHeader {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+.groupTitle {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.groupExternalId {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-accent);
+}
+
+.groupWorkflow {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.runRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+  background: none;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+
+.runRow:last-child {
+  border-bottom: none;
+}
+
+.runRow:hover {
+  background: var(--color-bg-active);
+}
+
+.runRow.stale {
+  opacity: 0.55;
+}
+
+.runId {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.domainState {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.rowTime {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--color-text-faint);
+  white-space: nowrap;
+}
+
+.needsYou {
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.sourceNote {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  padding: var(--space-2) 0;
+}

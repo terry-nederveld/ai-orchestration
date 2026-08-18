@@ -3,12 +3,17 @@
  * `packages/server/src/http.ts` for the authoritative route contract.
  */
 import type {
+  GraphRunView,
+  JudgmentOutcome,
   OrchestratorEvent,
   PendingApproval,
   ProviderStatus,
   Run,
   ServiceStatus,
   UsageRecord,
+  WaitCondition,
+  WaitRespondResult,
+  WaitWinner,
   WorkflowDefinition,
   WorkflowValidationResult,
   WorkItem,
@@ -116,6 +121,73 @@ export class ApiClient {
 
   resolveApproval(id: string, approved: boolean): Promise<{ resolved: boolean }> {
     return this.request('POST', `/api/approvals/${encodeURIComponent(id)}`, { approved })
+  }
+
+  listWaits(filter?: {
+    runId?: string
+    type?: string
+    reason?: string
+  }): Promise<readonly WaitCondition[]> {
+    const params = new URLSearchParams()
+    if (filter?.runId) params.set('runId', filter.runId)
+    if (filter?.type) params.set('type', filter.type)
+    if (filter?.reason) params.set('reason', filter.reason)
+    const query = params.toString()
+    return this.request<readonly WaitCondition[]>('GET', `/api/waits${query ? `?${query}` : ''}`)
+  }
+
+  /**
+   * Answer a durable wait. Non-2xx outcomes (validation failure, lost
+   * first-valid-response race with its winner, missing wait) come back as a
+   * typed result rather than a thrown error so callers can render them.
+   */
+  async respondToWait(
+    id: string,
+    value: unknown,
+    respondedBy?: string,
+  ): Promise<WaitRespondResult> {
+    const path = `/api/waits/${encodeURIComponent(id)}/respond`
+    let response: Response
+    try {
+      response = await fetch(new URL(path, this.connection.baseUrl), {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${this.connection.token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ value, ...(respondedBy ? { respondedBy } : {}) }),
+      })
+    } catch {
+      throw new ApiError(`could not reach the daemon at ${this.connection.baseUrl}`, 0, path)
+    }
+    if (response.ok) return { accepted: true }
+    let payload: { error?: string; winner?: WaitWinner } = {}
+    try {
+      payload = (await response.json()) as { error?: string; winner?: WaitWinner }
+    } catch {
+      // fall through to status text
+    }
+    return {
+      accepted: false,
+      status: response.status,
+      error: payload.error ?? `${response.status} ${response.statusText}`,
+      ...(payload.winner ? { winner: payload.winner } : {}),
+    }
+  }
+
+  /** Work-centric durable graph run view; undefined when the run has none. */
+  async getGraphRun(id: string): Promise<GraphRunView | undefined> {
+    try {
+      return await this.request<GraphRunView>('GET', `/api/graph-runs/${encodeURIComponent(id)}`)
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return undefined
+      throw error
+    }
+  }
+
+  listJudgments(since?: Date): Promise<readonly JudgmentOutcome[]> {
+    const query = since ? `?since=${encodeURIComponent(since.toISOString())}` : ''
+    return this.request<readonly JudgmentOutcome[]>('GET', `/api/judgments${query}`)
   }
 
   listUsage(start?: Date, end?: Date): Promise<readonly UsageRecord[]> {

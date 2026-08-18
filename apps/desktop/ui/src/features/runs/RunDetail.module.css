@@ -217,3 +217,97 @@
   color: var(--color-text-muted);
   overflow-wrap: anywhere;
 }
+
+/* ----- durable graph runs ------------------------------------------------ */
+
+.graphMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.nodeChips {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.nodeChip {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+}
+
+.historyList {
+  display: flex;
+  flex-direction: column;
+}
+
+.historyEntry {
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-2) 0;
+}
+
+.historyEntry:last-child {
+  border-bottom: none;
+}
+
+.historySummary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+}
+
+.historySummary::-webkit-details-marker {
+  display: none;
+}
+
+.historyNode {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.historyMeta {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--color-text-faint);
+  white-space: nowrap;
+}
+
+.historyOutputs {
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.waitBlock {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-3);
+}
+
+.waitBlock:last-child {
+  margin-bottom: 0;
+}
+
+.waitBlockHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}

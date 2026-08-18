@@ -379,6 +379,147 @@ export interface PendingApproval {
   readonly requestedAt: string
 }
 
+// ----- durable waits (Phase 2) -------------------------------------------
+
+export type WaitKind =
+  | 'human-input'
+  | 'approval'
+  | 'time'
+  | 'external-event'
+  | 'dependency'
+  | 'provider-availability'
+  | 'work-item-event'
+
+export type HumanInputType =
+  | 'text'
+  | 'boolean'
+  | 'single-choice'
+  | 'multiple-choice'
+  | 'approval'
+  | 'secret'
+  | 'file-reference'
+  | 'free-form'
+
+export interface HumanInputRequestSpec {
+  readonly type: HumanInputType
+  readonly prompt: string
+  readonly surface: 'app' | 'work_item' | 'both'
+  readonly choices?: readonly string[]
+  readonly secretName?: string
+  readonly timeoutMs?: number
+}
+
+export type WaitConditionStatus = 'open' | 'satisfied' | 'expired' | 'cancelled'
+
+export interface WaitCondition {
+  readonly id: string
+  readonly runId: string
+  readonly nodeId: string
+  readonly kind: WaitKind
+  readonly parameters: Readonly<Record<string, unknown>>
+  readonly request?: HumanInputRequestSpec
+  readonly status: WaitConditionStatus
+  readonly createdAt: string
+  readonly dueAt?: string
+}
+
+/** `parameters.reason` value marking a wait as an experiment judgment. */
+export const EXPERIMENT_JUDGMENT_REASON = 'EXPERIMENT_JUDGMENT_REQUIRED'
+/** `parameters.reason` value marking a wait as a workflow selection. */
+export const WORKFLOW_SELECTION_REASON = 'WORKFLOW_SELECTION_REQUIRED'
+
+/** Summary of the response that won a wait's first-valid-response race. */
+export interface WaitWinner {
+  readonly at: string
+  readonly responder?: string
+  readonly channel?: string
+  readonly value?: unknown
+}
+
+export type WaitRespondResult =
+  | { readonly accepted: true }
+  | {
+      readonly accepted: false
+      readonly status: number
+      readonly error: string
+      readonly winner?: WaitWinner
+    }
+
+// ----- experiments / judgments -------------------------------------------
+
+export interface JudgmentSurvivor {
+  readonly candidateId: string
+  readonly title: string
+  readonly summary: string
+  readonly weightedScore: number
+  readonly artifacts: Readonly<Record<string, string>>
+  readonly keyEvidence: readonly string[]
+}
+
+export interface JudgmentPackage {
+  readonly experimentId: string
+  readonly hypothesis: string
+  readonly rubricSummary: string
+  readonly killCriteria: readonly string[]
+  readonly survivors: readonly JudgmentSurvivor[]
+  readonly recommendation: string
+  readonly risks: readonly string[]
+  readonly iteration: number
+  readonly maxIterations: number
+}
+
+export type JudgmentDecision = 'kill' | 'advance' | 'iterate' | 'need-more-evidence'
+
+export interface JudgmentOutcome {
+  readonly experimentId: string
+  readonly decision: JudgmentDecision
+  readonly selectedCandidateId?: string
+  readonly feedback?: string
+  readonly decidedBy: string
+  readonly at: string
+}
+
+// ----- durable graph runs ------------------------------------------------
+
+export type GraphNodeStatus = 'succeeded' | 'failed' | 'skipped'
+
+export interface GraphNodeResult {
+  readonly nodeId: string
+  readonly attempt: number
+  readonly status: GraphNodeStatus
+  readonly outputs: Readonly<Record<string, unknown>>
+  readonly error?: string
+  readonly startedAt: string
+  readonly settledAt: string
+}
+
+export interface DomainState {
+  readonly name?: string
+  readonly data: Readonly<Record<string, unknown>>
+}
+
+export interface RunGraphState {
+  readonly runId: string
+  readonly snapshotId: string
+  readonly activeNodeIds: readonly string[]
+  readonly waitingNodeIds: readonly string[]
+  readonly nodeResults: Readonly<Record<string, GraphNodeResult>>
+  /** Newest-first as served by GET /api/graph-runs/:id. */
+  readonly resultHistory: readonly GraphNodeResult[]
+  readonly loopCounters: Readonly<Record<string, number>>
+  readonly activations: Readonly<Record<string, number>>
+  readonly domain: DomainState
+  readonly variables: Readonly<Record<string, unknown>>
+  readonly specRevision: number
+  readonly updatedAt: string
+}
+
+export interface GraphRunView {
+  readonly run?: Run
+  readonly state: RunGraphState
+  readonly openWaits: readonly WaitCondition[]
+}
+
 // ----- status / misc -----------------------------------------------------
 
 export interface ServiceStatus {
