@@ -11,19 +11,23 @@ import type {
   DefinitionStatus,
   DefinitionVersion,
   EventBus,
+  GraphIssue,
   IdGenerator,
+  JudgmentOutcome,
   Logger,
   ModelProvider,
   OrchestratorEvent,
   PersistenceProvider,
   ProviderAvailability,
   ProviderInfo,
+  RepositoryReference,
   Run,
   RunGraphState,
   UsageRecord,
   WaitCondition,
   WaitKind,
   WorkflowDefinition,
+  WorkflowGraph,
   WorkflowProvider,
   WorkItem,
   WorkProvider,
@@ -33,11 +37,13 @@ import {
   asId,
   DefinitionKind,
   InputValidationFailure,
+  OrchestratorError,
   RunState,
+  validateGraph,
   validateHumanInputValue,
 } from '@overture/core'
-import type { RunCoordinator, Scheduler } from '@overture/orchestrator'
-import { selectWorkflow } from '@overture/orchestrator'
+import type { EvaluationReport, RunCoordinator, Scheduler } from '@overture/orchestrator'
+import { evaluateWorkflow, selectWorkflow } from '@overture/orchestrator'
 import { parseWorkflowYaml, WorkflowValidationError } from '@overture/workflow'
 import type { ApprovalBroker, PendingApproval } from './approvals.js'
 
@@ -107,6 +113,24 @@ export type WaitRespondOutcome =
       }
     }
 
+/** Request body for side-effect-free Evaluate (ADR-0026). */
+export interface EvaluateRequest {
+  readonly workflowName: string
+  readonly version?: number
+  /** Work-item reference `<source>:<id>` (or bare id with one source). */
+  readonly itemExternalId?: string
+  /** Inline hypothetical item, used when no provider fetch is wanted. */
+  readonly item?: Readonly<Record<string, unknown>>
+  readonly variables?: Readonly<Record<string, unknown>>
+  readonly hypotheticalOutputs?: Readonly<Record<string, Readonly<Record<string, unknown>>>>
+}
+
+export type EvaluateOutcome =
+  | { readonly outcome: 'ok'; readonly report: EvaluationReport }
+  | { readonly outcome: 'unavailable'; readonly reason: string }
+  | { readonly outcome: 'invalid'; readonly reason: string }
+  | { readonly outcome: 'not-found'; readonly reason: string }
+
 const WAIT_KINDS: readonly WaitKind[] = [
   'human-input',
   'approval',
@@ -152,6 +176,13 @@ export interface OvertureServiceDeps {
    * assemblies still work; wait responses report 'unavailable' without it.
    */
   readonly graphCoordinator?: GraphWaitCoordinator
+  /**
+   * Executor-availability probe for side-effect-free Evaluate (ADR-0026),
+   * normally backed by the graph runtime's executor registry. Optional so
+   * v1-only assemblies still work; POST /api/evaluate reports 'unavailable'
+   * without it.
+   */
+  readonly evaluateExecutors?: { has(executorId: string): boolean }
   readonly persistence: PersistenceProvider
   readonly events: EventBus
   readonly scheduler: Scheduler
@@ -400,7 +431,7 @@ export class OvertureService {
       ...(filter?.kind ? { kind: filter.kind } : {}),
     })
     const matched = filter?.reason
-      ? open.filter((condition) => condition.parameters['reason'] === filter.reason)
+      ? open.filter((condition) => condition.parameters.reason === filter.reason)
       : open
     return this.redact(matched)
   }
@@ -517,6 +548,113 @@ export class OvertureService {
     return this.redact({ kind, name, lifecycle, latestVersion: existing.version })
   }
 
+  /**
+   * Structural validation for a definition document before it is saved.
+   * Workflow documents run the same `validateGraph` the engine enforces
+   * (ADR-0026: shared validation, not duplicated); other kinds have no
+   * structural validator yet and report no issues.
+   */
+  validateDefinitionDocument(
+    kind: DefinitionKind,
+    document: Readonly<Record<string, unknown>>,
+  ): readonly GraphIssue[] {
+    if (kind !== DefinitionKind.Workflow) return []
+    const shapeIssues = workflowDocumentShapeIssues(document)
+    if (shapeIssues.length > 0) return shapeIssues
+    return validateGraph(document as unknown as WorkflowGraph)
+  }
+
+  /**
+   * Side-effect-free Evaluate (ADR-0026): dry-run a workflow definition
+   * against a work item through read-only ports only. Nothing is claimed,
+   * persisted, started, or mutated — `evaluateWorkflow` accepts no port
+   * that can write.
+   */
+  async evaluate(request: EvaluateRequest): Promise<EvaluateOutcome> {
+    const executors = this.deps.evaluateExecutors
+    if (!executors) {
+      return {
+        outcome: 'unavailable',
+        reason: 'evaluate requires the graph runtime, which is not assembled in this daemon',
+      }
+    }
+    for (const [nodeId, outputs] of Object.entries(request.hypotheticalOutputs ?? {})) {
+      if (outputs === null || typeof outputs !== 'object' || Array.isArray(outputs)) {
+        return { outcome: 'invalid', reason: `hypotheticalOutputs.${nodeId} must be an object` }
+      }
+    }
+
+    let item: WorkItem
+    let workProvider: WorkProvider | undefined
+    if (request.item !== undefined) {
+      const normalized = normalizeInlineItem(request.item)
+      if (typeof normalized === 'string') return { outcome: 'invalid', reason: normalized }
+      item = normalized
+      const only = [...this.deps.workProviders.values()]
+      if (only.length === 1) workProvider = only[0]
+    } else if (request.itemExternalId !== undefined) {
+      let ref: { provider: WorkProvider; externalId: string }
+      try {
+        ref = this.parseWorkRef(request.itemExternalId)
+      } catch (error) {
+        return {
+          outcome: 'invalid',
+          reason: error instanceof Error ? error.message : String(error),
+        }
+      }
+      try {
+        item = await ref.provider.get(ref.externalId)
+      } catch {
+        return {
+          outcome: 'not-found',
+          reason: `work item '${request.itemExternalId}' was not found`,
+        }
+      }
+      workProvider = ref.provider
+    } else {
+      return { outcome: 'invalid', reason: 'itemExternalId or item is required' }
+    }
+
+    // Narrow the provider to its read path so evaluate cannot see comment/
+    // transition/claim even structurally.
+    const provider = workProvider
+    const work = provider
+      ? { get: (externalId: string, container?: string) => provider.get(externalId, container) }
+      : undefined
+    try {
+      const report = await evaluateWorkflow(
+        {
+          item,
+          workflowName: request.workflowName,
+          ...(request.version !== undefined ? { version: request.version } : {}),
+          ...(request.variables !== undefined ? { variables: request.variables } : {}),
+          ...(request.hypotheticalOutputs !== undefined
+            ? { hypotheticalOutputs: request.hypotheticalOutputs }
+            : {}),
+        },
+        {
+          definitions: this.deps.persistence.definitions,
+          executors,
+          ...(work ? { work } : {}),
+        },
+      )
+      return { outcome: 'ok', report: this.redact(report) }
+    } catch (error) {
+      if (error instanceof OrchestratorError && error.category === 'invalid-input') {
+        return { outcome: 'not-found', reason: error.message }
+      }
+      throw error
+    }
+  }
+
+  // ----- judgments -------------------------------------------------------
+
+  /** Judgment outcomes in [start, end), newest first, for observability. */
+  async listJudgments(start: Date, end: Date): Promise<readonly JudgmentOutcome[]> {
+    const outcomes = await this.deps.persistence.judgments.listForPeriod(start, end)
+    return this.redact([...outcomes].sort((a, b) => b.at.getTime() - a.at.getTime()))
+  }
+
   // ----- graph runs ------------------------------------------------------
 
   async getGraphRun(id: string): Promise<GraphRunView | undefined> {
@@ -551,5 +689,106 @@ export class OvertureService {
     for (const id of this.deps.coordinator.activeRunIds()) {
       await this.deps.coordinator.cancel(asId<'run'>(id), 'daemon shutdown')
     }
+  }
+}
+
+/**
+ * Pre-flight shape checks so `validateGraph` (which assumes the document
+ * already has the WorkflowGraph shape) never dereferences a missing field.
+ */
+function workflowDocumentShapeIssues(
+  document: Readonly<Record<string, unknown>>,
+): readonly GraphIssue[] {
+  const issues: GraphIssue[] = []
+  if (typeof document.name !== 'string' || document.name === '') {
+    issues.push({ path: 'name', message: 'name must be a non-empty string' })
+  }
+  if (typeof document.entry !== 'string' || document.entry === '') {
+    issues.push({ path: 'entry', message: 'entry must be a non-empty string' })
+  }
+  const nodes = document.nodes
+  if (!Array.isArray(nodes)) {
+    issues.push({ path: 'nodes', message: 'nodes must be an array' })
+  } else {
+    for (const [index, node] of nodes.entries()) {
+      const record =
+        node !== null && typeof node === 'object' ? (node as Record<string, unknown>) : undefined
+      if (!record || typeof record.id !== 'string' || record.id === '') {
+        issues.push({ path: `nodes[${index}]`, message: 'node id must be a non-empty string' })
+        continue
+      }
+      const config = record.config
+      const kind =
+        config !== null && typeof config === 'object'
+          ? (config as Record<string, unknown>).kind
+          : undefined
+      if (typeof kind !== 'string') {
+        issues.push({
+          path: `nodes.${record.id}`,
+          message: 'node config must declare a kind',
+        })
+      }
+    }
+  }
+  const transitions = document.transitions
+  if (!Array.isArray(transitions)) {
+    issues.push({ path: 'transitions', message: 'transitions must be an array' })
+  } else {
+    for (const [index, transition] of transitions.entries()) {
+      const record =
+        transition !== null && typeof transition === 'object'
+          ? (transition as Record<string, unknown>)
+          : undefined
+      if (
+        !record ||
+        typeof record.id !== 'string' ||
+        typeof record.from !== 'string' ||
+        typeof record.to !== 'string'
+      ) {
+        issues.push({
+          path: `transitions[${index}]`,
+          message: 'transition must declare string id, from, and to',
+        })
+      }
+    }
+  }
+  return issues
+}
+
+/**
+ * Builds a WorkItem from an inline Evaluate request body, defaulting the
+ * fields a hypothetical item does not need. Returns an error string when
+ * the body cannot identify an item.
+ */
+function normalizeInlineItem(raw: Readonly<Record<string, unknown>>): WorkItem | string {
+  const externalId =
+    typeof raw.externalId === 'string' && raw.externalId !== '' ? raw.externalId : undefined
+  if (externalId === undefined) return 'item.externalId must be a non-empty string'
+  const provider = typeof raw.provider === 'string' ? raw.provider : 'evaluate'
+  const repository = raw.repository
+  const hasRepository =
+    repository !== null &&
+    typeof repository === 'object' &&
+    typeof (repository as Record<string, unknown>).locator === 'string'
+  const metadata = raw.metadata
+  return {
+    id: asId<'work-item'>(`${provider}:${externalId}`),
+    provider,
+    externalId,
+    title: typeof raw.title === 'string' ? raw.title : externalId,
+    state: typeof raw.state === 'string' ? raw.state : '',
+    labels: Array.isArray(raw.labels)
+      ? raw.labels.filter((label): label is string => typeof label === 'string')
+      : [],
+    assignees: [],
+    relationships: [],
+    metadata:
+      metadata !== null && typeof metadata === 'object' && !Array.isArray(metadata)
+        ? (metadata as Record<string, unknown>)
+        : {},
+    ...(typeof raw.description === 'string' ? { description: raw.description } : {}),
+    ...(typeof raw.type === 'string' ? { type: raw.type } : {}),
+    ...(typeof raw.priority === 'string' ? { priority: raw.priority } : {}),
+    ...(hasRepository ? { repository: repository as RepositoryReference } : {}),
   }
 }

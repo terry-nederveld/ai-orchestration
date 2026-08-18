@@ -636,6 +636,40 @@ describe('control plane', () => {
     })
   })
 
+  describe('judgments', () => {
+    it('lists judgment outcomes newest-first with a since filter', async () => {
+      await persistence.judgments.save({
+        experimentId: 'exp-old',
+        decision: 'iterate',
+        decidedBy: 'terry',
+        at: new Date('2026-08-01T10:00:00Z'),
+      })
+      await persistence.judgments.save({
+        experimentId: 'exp-new',
+        decision: 'advance',
+        selectedCandidateId: 'cand-1',
+        decidedBy: 'terry',
+        at: new Date('2026-08-15T10:00:00Z'),
+      })
+
+      const listed = await (await api('/api/judgments?since=2026-07-01T00:00:00Z')).json()
+      expect(listed.map((outcome: { experimentId: string }) => outcome.experimentId)).toEqual([
+        'exp-new',
+        'exp-old',
+      ])
+      expect(listed[0].decision).toBe('advance')
+      expect(listed[0].selectedCandidateId).toBe('cand-1')
+      expect(listed[0].decidedBy).toBe('terry')
+
+      const recent = await (await api('/api/judgments?since=2026-08-10T00:00:00Z')).json()
+      expect(recent.map((outcome: { experimentId: string }) => outcome.experimentId)).toEqual([
+        'exp-new',
+      ])
+
+      expect((await api('/api/judgments?since=not-a-date')).status).toBe(400)
+    })
+  })
+
   it('requires auth on all phase 2 routes', async () => {
     const routes: ReadonlyArray<readonly [string, string]> = [
       ['GET', '/api/waits'],
@@ -645,6 +679,7 @@ describe('control plane', () => {
       ['PUT', '/api/definitions/workflow/mini'],
       ['POST', '/api/definitions/workflow/mini/lifecycle'],
       ['GET', '/api/graph-runs/run-1'],
+      ['GET', '/api/judgments'],
     ]
     for (const [method, route] of routes) {
       const response = await fetch(`http://127.0.0.1:${handle.port}${route}`, { method })

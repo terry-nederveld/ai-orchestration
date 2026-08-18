@@ -299,6 +299,70 @@ async function route(
     return
   }
 
+  if (method === 'POST' && path === '/api/definitions/validate') {
+    const body = await readJson(request)
+    const rawKind = stringField(body, 'kind')
+    const kind = parseDefinitionKind(rawKind ?? '')
+    if (!kind) {
+      sendJson(response, 400, { error: `unknown definition kind '${rawKind ?? ''}'` })
+      return
+    }
+    const document = objectField(body, 'document')
+    if (!document) {
+      sendJson(response, 400, { error: 'document must be an object' })
+      return
+    }
+    sendJson(response, 200, { issues: service.validateDefinitionDocument(kind, document) })
+    return
+  }
+
+  if (method === 'POST' && path === '/api/evaluate') {
+    const body = await readJson(request)
+    const workflowName = stringField(body, 'workflowName')
+    if (!workflowName) {
+      sendJson(response, 400, { error: 'workflowName is required' })
+      return
+    }
+    const record = body as Record<string, unknown>
+    const version = record.version
+    if (version !== undefined && (!Number.isInteger(version) || (version as number) < 1)) {
+      sendJson(response, 400, { error: 'invalid version' })
+      return
+    }
+    const itemExternalId = stringField(body, 'itemExternalId')
+    const item = objectField(body, 'item')
+    const variables = objectField(body, 'variables')
+    const hypotheticalOutputs = objectField(body, 'hypotheticalOutputs')
+    const result = await service.evaluate({
+      workflowName,
+      ...(version !== undefined ? { version: version as number } : {}),
+      ...(itemExternalId !== undefined ? { itemExternalId } : {}),
+      ...(item !== undefined ? { item } : {}),
+      ...(variables !== undefined ? { variables } : {}),
+      ...(hypotheticalOutputs !== undefined
+        ? {
+            hypotheticalOutputs: hypotheticalOutputs as Readonly<
+              Record<string, Readonly<Record<string, unknown>>>
+            >,
+          }
+        : {}),
+    })
+    switch (result.outcome) {
+      case 'ok':
+        sendJson(response, 200, result.report)
+        return
+      case 'unavailable':
+        sendJson(response, 503, { error: result.reason })
+        return
+      case 'not-found':
+        sendJson(response, 404, { error: result.reason })
+        return
+      default:
+        sendJson(response, 400, { error: result.reason })
+        return
+    }
+  }
+
   const lifecycleMatch = path.match(/^\/api\/definitions\/([^/]+)\/([^/]+)\/lifecycle$/)
   if (method === 'POST' && lifecycleMatch?.[1] && lifecycleMatch[2]) {
     const kind = parseDefinitionKind(decodeId(lifecycleMatch[1]) ?? '')
@@ -349,6 +413,22 @@ async function route(
       201,
       await service.saveDefinition(kind, name, body as Record<string, unknown>),
     )
+    return
+  }
+
+  if (method === 'GET' && path === '/api/judgments') {
+    const since = url.searchParams.get('since')
+    const until = url.searchParams.get('until')
+    const now = new Date()
+    const start = since ? new Date(since) : new Date(now.getTime() - 30 * 86_400_000)
+    // listForPeriod is half-open [start, end); nudge past `now` so outcomes
+    // recorded this instant are included.
+    const end = until ? new Date(until) : new Date(now.getTime() + 1000)
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      sendJson(response, 400, { error: 'invalid since/until timestamp' })
+      return
+    }
+    sendJson(response, 200, await service.listJudgments(start, end))
     return
   }
 
@@ -444,6 +524,16 @@ function stringField(body: unknown, field: string): string | undefined {
   if (body !== null && typeof body === 'object' && field in body) {
     const value = (body as Record<string, unknown>)[field]
     if (typeof value === 'string') return value
+  }
+  return undefined
+}
+
+function objectField(body: unknown, field: string): Readonly<Record<string, unknown>> | undefined {
+  if (body !== null && typeof body === 'object' && field in body) {
+    const value = (body as Record<string, unknown>)[field]
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, unknown>
+    }
   }
   return undefined
 }
