@@ -84,6 +84,28 @@ the vendor CLIs you have logged into are trusted.
   resources and write inside the workspace. Container-based workspace
   isolation is a planned post-v1 strategy behind the existing
   WorkspaceProvider port.
+- **Convention instruction files from cloned repositories are trusted
+  guidance.** `CLAUDE.md`, `AGENTS.md`, and the like discovered in a work
+  item's repository are attached to agent context as high-precedence
+  instructions (`packages/resolution`). A hostile repository's convention
+  file therefore becomes trusted steering for the agent working on it —
+  the same trust boundary as the repository's test code. Review the
+  convention files of repositories you point autonomous workflows at.
+- **Git-branch checkpoints commit the whole dirty worktree.** A suspended
+  coding run's WIP checkpoint stages every uncommitted file
+  (`packages/checkpoints`) and pushes it to the run branch. A secret an
+  agent wrote to an un-gitignored file is pushed with it. Keep secrets
+  out of the workspace (they belong in the secret store, injected via the
+  environment allowlist) and ensure `.gitignore` covers agent-written
+  credential files. A staged-content secret scan at the checkpoint
+  boundary is a planned hardening.
+- **Desktop stores each runtime's bearer token in localStorage.** The
+  federated desktop persists connection tokens in `localStorage` so
+  connections survive restarts (`apps/desktop/ui/src/api/connection.tsx`);
+  a script-injection bug in the UI could read every stored token. The UI
+  is uniformly React-escaped and ships a restrictive CSP as the backstop,
+  but treat the desktop host as part of the trust boundary. Moving tokens
+  to OS secure storage is a planned hardening.
 
 ## Platform notes
 

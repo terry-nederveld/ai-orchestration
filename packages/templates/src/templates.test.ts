@@ -81,7 +81,9 @@ describe('flagship templates', () => {
     await installTemplates(persistence.definitions)
     const latest = await persistence.definitions.get(DefinitionKind.Workflow, 'autonomous-delivery')
     expect(latest?.version).toBe(2)
-    expect((latest?.document as { description?: string }).description).toBe('operator tuned')
+    expect((latest?.document as { description?: string } | undefined)?.description).toBe(
+      'operator tuned',
+    )
 
     // refresh: true deliberately mints the pristine template again.
     const refreshed = await installTemplates(persistence.definitions, {
