@@ -4,7 +4,6 @@ import {
   asId,
   type CheckpointStrategy,
   DefinitionKind,
-  type ExecutionSpecification,
   type IdGenerator,
   InMemoryEventBus,
   noopLogger,
@@ -220,7 +219,7 @@ describe('GraphRunCoordinator durable suspension', () => {
     const finished = await h.persistence.runs.get(runId)
     expect(finished?.state).toBe(RunState.Completed)
     const state = await h.persistence.runGraphs.get(runId)
-    expect(state?.nodeResults['ask']?.outputs['value']).toBe('postgres')
+    expect(state?.nodeResults.ask?.outputs.value).toBe('postgres')
   })
 
   it('rejects invalid typed input and applies first-response-wins', async () => {
@@ -401,7 +400,7 @@ describe('GraphRunCoordinator durable suspension', () => {
     const run = await coordinator.start(h.item, 'branching-flow', asId<'run'>('run-G'))
     expect(run.state).toBe(RunState.Completed)
     const state = await h.persistence.runGraphs.get(asId<'run'>('run-G'))
-    expect(state?.nodeResults['security']?.status).toBe('succeeded')
+    expect(state?.nodeResults.security?.status).toBe('succeeded')
   })
 
   it('runs sub-workflows as child runs and joins on completion', async () => {

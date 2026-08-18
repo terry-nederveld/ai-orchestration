@@ -95,7 +95,7 @@ describe('createExperimentStepper', () => {
     const yielded = await stepper.step(baseInput)
     if (yielded.type !== 'wait') throw new Error(`expected wait, got ${JSON.stringify(yielded)}`)
     expect(yielded.spec.kind).toBe('human-input')
-    expect(yielded.spec.parameters?.['reason']).toBe(EXPERIMENT_JUDGMENT_REASON)
+    expect(yielded.spec.parameters?.reason).toBe(EXPERIMENT_JUDGMENT_REASON)
     expect(yielded.request?.type).toBe('single-choice')
     expect(yielded.request?.choices).toHaveLength(5)
     expect(yielded.request?.choices?.filter((c) => c.startsWith('advance:'))).toHaveLength(2)
@@ -132,11 +132,11 @@ describe('createExperimentStepper', () => {
     })
     if (concluded.type !== 'result') throw new Error('expected result')
     expect(concluded.status).toBe('succeeded')
-    expect(concluded.outputs?.['conclusion']).toBe('advanced')
-    const selected = concluded.outputs?.['selected'] as { candidateId: string; title: string }
+    expect(concluded.outputs?.conclusion).toBe('advanced')
+    const selected = concluded.outputs?.selected as { candidateId: string; title: string }
     expect(`advance:${selected.candidateId}`).toBe(advanceChoice)
     expect(selected.title).toBe('A')
-    expect(String(concluded.outputs?.['learning'])).toContain('a better approach exists')
+    expect(String(concluded.outputs?.learning)).toContain('a better approach exists')
 
     const record = (await persistence.experiments.listForRun(asId('run-1') as RunId))[0]
     const judgments = await persistence.judgments.listForExperiment(record?.id ?? '')
@@ -167,7 +167,7 @@ describe('createExperimentStepper', () => {
     })
     if (concluded.type !== 'result') throw new Error('expected result')
     expect(concluded.status).toBe('succeeded')
-    expect(concluded.outputs?.['conclusion']).toBe('killed')
+    expect(concluded.outputs?.conclusion).toBe('killed')
   })
 
   it('iterates within the bound and exhausts at maxIterations', async () => {
@@ -201,7 +201,7 @@ describe('createExperimentStepper', () => {
     // A third iterate request exceeds the bound: exhausted, not another loop.
     const third = await stepper.step(iterate(new Date()))
     if (third.type !== 'result') throw new Error('expected exhausted result')
-    expect(third.outputs?.['conclusion']).toBe('exhausted')
+    expect(third.outputs?.conclusion).toBe('exhausted')
   })
 
   it('rejects malformed judgment choices', () => {

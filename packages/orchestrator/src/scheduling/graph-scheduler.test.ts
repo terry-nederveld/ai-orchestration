@@ -227,7 +227,7 @@ describe('GraphScheduler lane dispatch', () => {
     expect(report.halted?.reason).toBe('workflow selection required')
     const open = await h.persistence.waits.listOpen({})
     expect(open).toHaveLength(1)
-    expect(open[0]?.parameters['reason']).toBe('WORKFLOW_SELECTION_REQUIRED')
+    expect(open[0]?.parameters.reason).toBe('WORKFLOW_SELECTION_REQUIRED')
   })
 
   it('a disabled lane dispatches nothing', async () => {
@@ -268,7 +268,7 @@ describe('GraphScheduler recurring schedules', () => {
     const call = h.starter.calls[0]
     expect(call?.workflow).toBe('report-flow')
     expect(call?.item.provider).toBe('schedule')
-    expect(call?.item.metadata['scheduleName']).toBe('quarter-hourly')
+    expect(call?.item.metadata.scheduleName).toBe('quarter-hourly')
   })
 
   it('does not double-fire across scheduler restarts', async () => {

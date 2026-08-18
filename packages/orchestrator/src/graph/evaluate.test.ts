@@ -256,8 +256,8 @@ describe('evaluateWorkflow', () => {
       ['notify', 'action'],
     ])
     const action = report.expectedSideEffects[2]
-    expect(action?.details?.['action']).toBe('work_item.comment')
-    expect(action?.details?.['args']).toEqual({ body: 'Add export feature' })
+    expect(action?.details?.action).toBe('work_item.comment')
+    expect(action?.details?.args).toEqual({ body: 'Add export feature' })
 
     expect(report.blockers).toEqual([])
   })

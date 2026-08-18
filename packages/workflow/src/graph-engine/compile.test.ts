@@ -269,11 +269,11 @@ describe('compiled built-in workflow on the real GraphEngine', () => {
     })
     const outcome = await execute(graph, executors)
     expect(outcome.status).toBe('completed')
-    expect(calls['remediate']).toBe(1)
-    expect(calls['re_review']).toBe(1)
-    expect(calls['ensure_validated']).toBe(1)
-    expect(calls['deliver']).toBe(1)
-    expect(outcome.state.nodeResults['review']?.status).toBe('failed')
+    expect(calls.remediate).toBe(1)
+    expect(calls.re_review).toBe(1)
+    expect(calls.ensure_validated).toBe(1)
+    expect(calls.deliver).toBe(1)
+    expect(outcome.state.nodeResults.review?.status).toBe('failed')
   })
 
   it('(c) fails when review fails and remediation cannot fix it', async () => {
@@ -286,10 +286,10 @@ describe('compiled built-in workflow on the real GraphEngine', () => {
     const outcome = await execute(graph, executors)
     expect(outcome.status).toBe('failed')
     expect(outcome.error).toContain('ensure_validated')
-    expect(calls['re_review']).toBeUndefined()
-    expect(calls['ensure_validated']).toBe(1)
-    expect(calls['deliver']).toBeUndefined()
-    expect(outcome.state.nodeResults['ensure_validated']?.error).toBe(
+    expect(calls.re_review).toBeUndefined()
+    expect(calls.ensure_validated).toBe(1)
+    expect(calls.deliver).toBeUndefined()
+    expect(outcome.state.nodeResults.ensure_validated?.error).toBe(
       'neither review nor re-review succeeded',
     )
   })
@@ -303,9 +303,9 @@ describe('compiled built-in workflow on the real GraphEngine', () => {
     const outcome = await execute(graph, executors)
     expect(outcome.status).toBe('failed')
     expect(outcome.error).toContain("'implement' failed")
-    expect(calls['test']).toBeUndefined()
-    expect(calls['review']).toBeUndefined()
-    expect(calls['deliver']).toBeUndefined()
+    expect(calls.test).toBeUndefined()
+    expect(calls.review).toBeUndefined()
+    expect(calls.deliver).toBeUndefined()
   })
 })
 
@@ -321,7 +321,7 @@ describe('compiled v1 semantics', () => {
     })
     const outcome = await execute(graph, executors)
     expect(outcome.status).toBe('completed')
-    expect(calls['b']).toBe(1)
+    expect(calls.b).toBe(1)
   })
 
   it('continueOnFailure on a terminal step keeps the run completed', async () => {
@@ -354,8 +354,8 @@ describe('compiled v1 semantics', () => {
     })
     const outcome = await execute(graph, executors)
     expect(outcome.status).toBe('failed')
-    expect(calls['b']).toBeUndefined()
-    expect(calls['c']).toBeUndefined()
+    expect(calls.b).toBeUndefined()
+    expect(calls.c).toBeUndefined()
   })
 
   it('a when-false skip of a terminal step is benign: the run completes', async () => {
@@ -368,7 +368,7 @@ describe('compiled v1 semantics', () => {
     const { executors, calls } = scripted(definition)
     const outcome = await execute(graph, executors)
     expect(outcome.status).toBe('completed')
-    expect(calls['gated']).toBeUndefined()
+    expect(calls.gated).toBeUndefined()
   })
 
   it('a benign when-false skip propagates through no-when dependents to a terminal step', async () => {
@@ -386,10 +386,10 @@ describe('compiled v1 semantics', () => {
     const { executors, calls } = scripted(definition)
     const outcome = await execute(graph, executors)
     expect(outcome.status).toBe('completed')
-    expect(calls['a']).toBe(1)
-    expect(calls['gate']).toBeUndefined()
-    expect(calls['b']).toBeUndefined()
-    expect(calls['c']).toBeUndefined()
+    expect(calls.a).toBe(1)
+    expect(calls.gate).toBeUndefined()
+    expect(calls.b).toBeUndefined()
+    expect(calls.c).toBeUndefined()
   })
 
   it('the same chain runs end to end when the gate condition is true', async () => {
@@ -423,7 +423,7 @@ describe('compiled v1 semantics', () => {
     // `fix` is the only terminal step (v1: `work`'s failure is consumed by
     // the when-gated remediation), so the run completes.
     expect(outcome.status).toBe('completed')
-    expect(calls['fix']).toBe(1)
+    expect(calls.fix).toBe(1)
   })
 
   it('multi-dependency steps all-join and run exactly once', async () => {
@@ -442,6 +442,6 @@ describe('compiled v1 semantics', () => {
     const { executors, calls } = scripted(definition)
     const outcome = await execute(graph, executors)
     expect(outcome.status).toBe('completed')
-    expect(calls['merge']).toBe(1)
+    expect(calls.merge).toBe(1)
   })
 })

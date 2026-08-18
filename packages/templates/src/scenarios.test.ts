@@ -348,7 +348,7 @@ describe('Scenario B — Autonomous Discovery', () => {
     const judgmentWaits = await h.persistence.waits.listOpen({ runId })
     expect(judgmentWaits).toHaveLength(1)
     expect(judgmentWaits[0]?.request?.type).toBe('single-choice')
-    expect(judgmentWaits[0]?.parameters['reason']).toBe('EXPERIMENT_JUDGMENT_REQUIRED')
+    expect(judgmentWaits[0]?.parameters.reason).toBe('EXPERIMENT_JUDGMENT_REQUIRED')
     const advance = judgmentWaits[0]?.request?.choices?.find((c) => c.startsWith('advance:'))
     expect(advance).toBeDefined()
 
@@ -433,8 +433,8 @@ describe('Scenario B — Autonomous Discovery', () => {
     expect(finished?.state).toBe(RunState.Completed)
     const state = await h.persistence.runGraphs.get(runId)
     expect(state?.domain.name).toBe('concluded-killed')
-    expect(state?.nodeResults['experiment']?.outputs['conclusion']).toBe('killed')
+    expect(state?.nodeResults.experiment?.outputs.conclusion).toBe('killed')
     // The learning summary is preserved in the node outputs for projection.
-    expect(String(state?.nodeResults['experiment']?.outputs['learning'])).toContain('Hypothesis')
+    expect(String(state?.nodeResults.experiment?.outputs.learning)).toContain('Hypothesis')
   })
 })

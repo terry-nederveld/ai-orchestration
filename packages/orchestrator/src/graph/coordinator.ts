@@ -233,8 +233,8 @@ export class GraphRunCoordinator {
       ...(input ? { input } : {}),
       event: {
         ...(response.event ?? {}),
-        ...(condition.parameters['gateId'] !== undefined
-          ? { gateId: condition.parameters['gateId'] }
+        ...(condition.parameters.gateId !== undefined
+          ? { gateId: condition.parameters.gateId }
           : {}),
       },
     }
@@ -612,7 +612,7 @@ export class GraphRunCoordinator {
   private async satisfyParentWaits(run: Run): Promise<void> {
     const open = await this.options.persistence.waits.listOpen({ kind: 'dependency' })
     for (const condition of open) {
-      const childRunIds = condition.parameters['childRunIds']
+      const childRunIds = condition.parameters.childRunIds
       if (!Array.isArray(childRunIds) || !childRunIds.includes(String(run.id))) continue
 
       const children = await Promise.all(
@@ -637,7 +637,7 @@ export class GraphRunCoordinator {
         .filter((child) => child.run && child.run.state !== RunState.Completed)
         .map((child) => child.id)
 
-      const join = (condition.parameters['join'] ?? { mode: 'all' }) as JoinSpec
+      const join = (condition.parameters.join ?? { mode: 'all' }) as JoinSpec
       const total = childRunIds.length
       let decided: boolean | undefined
       if (join.mode === 'any' && succeededIds.length >= 1) decided = true
@@ -728,8 +728,8 @@ export class GraphRunCoordinator {
       strategy.id === 'git-branch'
     ) {
       const restored = await strategy.restore(checkpoint)
-      const path = restored['workspacePath']
-      const branch = restored['branch']
+      const path = restored.workspacePath
+      const branch = restored.branch
       if (typeof path === 'string') {
         return {
           id: asId<'workspace'>(`${String(run.id)}-restored`),
@@ -848,9 +848,9 @@ function timeWaitDueAt(pending: PendingWait, now: Date): Date | undefined {
       ? new Date(now.getTime() + pending.request.timeoutMs)
       : undefined
   }
-  const afterMs = pending.spec.parameters['afterMs']
+  const afterMs = pending.spec.parameters.afterMs
   if (typeof afterMs === 'number') return new Date(now.getTime() + afterMs)
-  const until = pending.spec.parameters['until']
+  const until = pending.spec.parameters.until
   if (typeof until === 'string') {
     const parsed = new Date(until)
     if (!Number.isNaN(parsed.getTime())) return parsed

@@ -330,7 +330,7 @@ export class GraphScheduler {
     const persistence = this.options.persistence
     const condition = await persistence.waits.get(waitId)
     if (!condition) return { accepted: false, reason: 'unknown wait' }
-    if (condition.parameters['reason'] !== WORKFLOW_SELECTION_REQUIRED) {
+    if (condition.parameters.reason !== WORKFLOW_SELECTION_REQUIRED) {
       return { accepted: false, reason: 'not a workflow selection wait' }
     }
     if (condition.request) {
@@ -375,7 +375,7 @@ export class GraphScheduler {
       channel: 'app',
     })
 
-    const item = condition.parameters['item'] as WorkItem
+    const item = condition.parameters.item as WorkItem
     await this.recordDecision(item, selection.workflow, selection.responder, now)
 
     const run = await this.claimAndStart(item, selection.workflow)
@@ -391,7 +391,7 @@ export class GraphScheduler {
     const runId = asId<'run'>(`routing:${String(item.id)}`)
     const open = await persistence.waits.listOpen({ runId })
     const existing = open.find(
-      (condition) => condition.parameters['reason'] === WORKFLOW_SELECTION_REQUIRED,
+      (condition) => condition.parameters.reason === WORKFLOW_SELECTION_REQUIRED,
     )
     if (existing) return existing.id
 
@@ -455,9 +455,7 @@ export class GraphScheduler {
     const persistence = this.options.persistence
     const runId = asId<'run'>(`routing-rule:${ruleNameFor(suggestion)}`)
     const open = await persistence.waits.listOpen({ runId })
-    const existing = open.find(
-      (condition) => condition.parameters['reason'] === ROUTING_RULE_PROPOSAL,
-    )
+    const existing = open.find((condition) => condition.parameters.reason === ROUTING_RULE_PROPOSAL)
     if (existing) return existing.id
 
     const prompt =
@@ -494,7 +492,7 @@ export class GraphScheduler {
   ): Promise<{ readonly accepted: boolean; readonly persisted: boolean }> {
     const persistence = this.options.persistence
     const condition = await persistence.waits.get(waitId)
-    if (!condition || condition.parameters['reason'] !== ROUTING_RULE_PROPOSAL) {
+    if (!condition || condition.parameters.reason !== ROUTING_RULE_PROPOSAL) {
       return { accepted: false, persisted: false }
     }
     const now = this.options.clock.now()
@@ -519,7 +517,7 @@ export class GraphScheduler {
     })
     if (!response.approved) return { accepted: true, persisted: false }
 
-    const suggestion = condition.parameters['suggestion'] as RoutingRuleSuggestion
+    const suggestion = condition.parameters.suggestion as RoutingRuleSuggestion
     const rule: RoutingRule = {
       name: ruleNameFor(suggestion),
       condition: suggestion.condition,

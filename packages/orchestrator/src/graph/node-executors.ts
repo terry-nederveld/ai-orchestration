@@ -10,7 +10,6 @@ import type {
   AgentProfileDefinition,
   AgentRunRequest,
   Clock,
-  DefinitionVersion,
   EvaluationRubric,
   EventBus,
   ExperimentDefinition,
@@ -570,8 +569,8 @@ export function createGraphNodeExecutors(deps: GraphExecutorDeps): GraphNodeExec
         error: `rubric '${rubricName}' not in snapshot`,
       }
     }
-    const fromDomain = context.domain.data['hypothesis']
-    const fromVariables = context.variables['hypothesis']
+    const fromDomain = context.domain.data.hypothesis
+    const fromVariables = context.variables.hypothesis
     const hypothesis =
       typeof fromDomain === 'string'
         ? fromDomain
@@ -606,8 +605,8 @@ export function createGraphNodeExecutors(deps: GraphExecutorDeps): GraphNodeExec
 }
 
 function childCompletionResult(event: Readonly<Record<string, unknown>>): NodeYield {
-  const failedBranches = event['failedBranches']
-  const succeeded = event['succeeded'] === true
+  const failedBranches = event.failedBranches
+  const succeeded = event.succeeded === true
   return {
     type: 'result',
     status: succeeded ? 'succeeded' : 'failed',
@@ -655,8 +654,8 @@ async function evaluateGateNode(
   // Human gates suspend; the coordinator injects the pending gate id into
   // the satisfaction event when the approval arrives.
   const approvedGateId =
-    context.satisfaction?.event?.['gateId'] !== undefined
-      ? String(context.satisfaction.event['gateId'])
+    context.satisfaction?.event?.gateId !== undefined
+      ? String(context.satisfaction.event.gateId)
       : undefined
   const humanApproval =
     context.satisfaction?.input?.value === true
@@ -736,11 +735,11 @@ async function evaluateGateNode(
         { role: `gate:${gate.id}` },
       )
       const structured = parseStructuredOutputs(result.summary)
-      const passed = structured?.['passed'] === true
+      const passed = structured?.passed === true
       return {
         gateId: gate.id,
         passed,
-        reason: String(structured?.['reason'] ?? result.summary.slice(0, 300)),
+        reason: String(structured?.reason ?? result.summary.slice(0, 300)),
         evaluatedBy: 'agent',
         attempt,
         at,

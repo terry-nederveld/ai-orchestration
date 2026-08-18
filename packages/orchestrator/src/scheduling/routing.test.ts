@@ -185,7 +185,7 @@ describe('GraphScheduler routing dispatch', () => {
     expect(first.waitId).toBeDefined()
 
     const wait = await h.persistence.waits.get(first.waitId ?? '')
-    expect(wait?.parameters['reason']).toBe('WORKFLOW_SELECTION_REQUIRED')
+    expect(wait?.parameters.reason).toBe('WORKFLOW_SELECTION_REQUIRED')
     expect(wait?.request?.type).toBe('single-choice')
     expect(wait?.request?.surface).toBe('app')
     expect(wait?.request?.choices).toEqual(['infra-flow', 'ops-flow'])

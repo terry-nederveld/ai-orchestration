@@ -152,7 +152,7 @@ describe('GraphEngine basics', () => {
     expect(outcome.status).toBe('completed')
     expect(outcome.terminal?.outcome).toBe('completed')
     expect(calls).toEqual({ a: 1, b: 1, end: 1 })
-    expect(outcome.state.nodeResults['a']?.status).toBe('succeeded')
+    expect(outcome.state.nodeResults.a?.status).toBe('succeeded')
   })
 
   it('selects among declared transitions using structured outputs', async () => {
@@ -171,8 +171,8 @@ describe('GraphEngine basics', () => {
     })
     const outcome = await run(g, executors)
     expect(outcome.status).toBe('completed')
-    expect(calls['deep']).toBe(1)
-    expect(calls['fast']).toBeUndefined()
+    expect(calls.deep).toBe(1)
+    expect(calls.fast).toBeUndefined()
   })
 
   it('fails the run when a succeeded node has no matching transition (stall)', async () => {
@@ -204,7 +204,7 @@ describe('GraphEngine basics', () => {
     })
     const outcome = await run(routed, executors)
     expect(outcome.status).toBe('completed')
-    expect(calls['remediate']).toBe(1)
+    expect(calls.remediate).toBe(1)
 
     const unrouted = graph(
       [agent('work'), terminal('end')],
@@ -234,9 +234,9 @@ describe('GraphEngine basics', () => {
     })
     const outcome = await run(g, executors)
     expect(outcome.status).toBe('completed')
-    expect(calls['flaky']).toBe(3)
+    expect(calls.flaky).toBe(3)
     expect(outcome.state.resultHistory.filter((r) => r.nodeId === 'flaky')).toHaveLength(3)
-    expect(outcome.state.nodeResults['flaky']?.attempt).toBe(3)
+    expect(outcome.state.nodeResults.flaky?.attempt).toBe(3)
   })
 })
 
@@ -262,7 +262,7 @@ describe('GraphEngine loops and joins', () => {
     })
     const outcome = await run(g, executors)
     expect(outcome.status).toBe('completed')
-    expect(calls['step']).toBe(3)
+    expect(calls.step).toBe(3)
   })
 
   it('fails the run when a loop bound is exceeded', async () => {
@@ -303,7 +303,7 @@ describe('GraphEngine loops and joins', () => {
     const { executors, calls } = scripted({})
     const outcome = await run(allJoin, executors)
     expect(outcome.status).toBe('completed')
-    expect(calls['merge']).toBe(1)
+    expect(calls.merge).toBe(1)
 
     const anyJoin = graph(
       [
@@ -325,7 +325,7 @@ describe('GraphEngine loops and joins', () => {
     const { executors: executors2, calls: calls2 } = scripted({})
     const outcome2 = await run(anyJoin, executors2)
     expect(outcome2.status).toBe('completed')
-    expect(calls2['merge']).toBe(1)
+    expect(calls2.merge).toBe(1)
   })
 
   it('min-join proceeds after n branches', async () => {
@@ -352,8 +352,8 @@ describe('GraphEngine loops and joins', () => {
     const { executors, calls } = scripted({})
     const outcome = await run(g, executors)
     expect(outcome.status).toBe('completed')
-    expect(calls['merge']).toBe(1)
-    expect(calls['c']).toBeUndefined()
+    expect(calls.merge).toBe(1)
+    expect(calls.c).toBeUndefined()
   })
 })
 
@@ -381,14 +381,14 @@ describe('GraphEngine durable waits', () => {
     expect(first.status).toBe('waiting')
     expect(first.newWaits).toHaveLength(1)
     expect(first.newWaits[0]?.request?.prompt).toBe('which db?')
-    expect(calls['after']).toBeUndefined()
+    expect(calls.after).toBeUndefined()
 
     // Tick again with no satisfaction: still waiting, no re-execution churn.
-    const askCallsBefore = calls['ask']
+    const askCallsBefore = calls.ask
     const second = await engine.tick({ graph: g, state: roundTrip(first.state), executors })
     expect(second.status).toBe('waiting')
     expect(second.newWaits).toHaveLength(0)
-    expect(calls['ask']).toBe(askCallsBefore)
+    expect(calls.ask).toBe(askCallsBefore)
 
     // Satisfaction arrives (state has been through JSON round-trip twice).
     const third = await engine.tick({
@@ -410,8 +410,8 @@ describe('GraphEngine durable waits', () => {
       },
     })
     expect(third.status).toBe('completed')
-    expect(third.state.nodeResults['ask']?.outputs['value']).toBe('postgres')
-    expect(calls['after']).toBe(1)
+    expect(third.state.nodeResults.ask?.outputs.value).toBe('postgres')
+    expect(calls.after).toBe(1)
   })
 
   it('a wait in one branch does not block an independent branch', async () => {
@@ -435,8 +435,8 @@ describe('GraphEngine durable waits', () => {
     const { executors, calls } = scripted({})
     const first = await run(g, executors)
     expect(first.status).toBe('waiting')
-    expect(calls['free']).toBe(1)
-    expect(calls['merge']).toBeUndefined()
+    expect(calls.free).toBe(1)
+    expect(calls.merge).toBeUndefined()
 
     const second = await engine.tick({
       graph: g,
@@ -445,7 +445,7 @@ describe('GraphEngine durable waits', () => {
       satisfactions: { pause: { kind: 'time', at: new Date() } },
     })
     expect(second.status).toBe('completed')
-    expect(calls['merge']).toBe(1)
+    expect(calls.merge).toBe(1)
   })
 })
 
@@ -480,7 +480,7 @@ describe('GraphEngine effects, guards, and lifecycle', () => {
     })
     expect(outcome.status).toBe('completed')
     expect(outcome.state.domain.name).toBe('implementing')
-    expect(outcome.state.domain.data['verdict']).toBe('high')
+    expect(outcome.state.domain.data.verdict).toBe('high')
     expect(outcome.projections).toEqual(['In Progress'])
     expect(events.some((event) => event.type === 'transition.taken')).toBe(true)
     expect(
@@ -505,9 +505,9 @@ describe('GraphEngine effects, guards, and lifecycle', () => {
     const { executors, calls } = scripted({})
     const outcome = await run(g, executors)
     expect(outcome.status).toBe('completed')
-    expect(calls['guarded']).toBeUndefined() // executor never ran
-    expect(outcome.state.nodeResults['guarded']?.error).toContain('guard failed')
-    expect(calls['fallback']).toBe(1)
+    expect(calls.guarded).toBeUndefined() // executor never ran
+    expect(outcome.state.nodeResults.guarded?.error).toContain('guard failed')
+    expect(calls.fallback).toBe(1)
   })
 
   it('reports blocked terminals and honors cancellation', async () => {
