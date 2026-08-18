@@ -82,6 +82,17 @@ export interface WorkComment {
   readonly body: string
 }
 
+export interface WorkItemDraft {
+  readonly title: string
+  readonly description?: string
+  readonly type?: string
+  readonly labels?: readonly string[]
+  /** Provider-scoped container override (repo, project key, team). */
+  readonly container?: string
+  /** Relationship from the NEW item to an existing one. */
+  readonly relateTo?: { readonly kind: WorkRelationshipKind; readonly targetExternalId: string }
+}
+
 export interface WorkTransition {
   readonly targetState: string
   readonly comment?: string
@@ -112,4 +123,8 @@ export interface WorkProvider {
   getDescription?(item: WorkItem): Promise<string>
   /** Replace the full description/body. */
   updateDescription?(item: WorkItem, description: string): Promise<void>
+  /** Create a new work item; returns the canonical item. */
+  createItem?(draft: WorkItemDraft): Promise<WorkItem>
+  /** Link two existing items with a relationship, where supported. */
+  linkItems?(from: WorkItem, kind: WorkRelationshipKind, targetExternalId: string): Promise<void>
 }
