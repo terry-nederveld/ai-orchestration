@@ -654,3 +654,72 @@ describe('LinearWorkProvider error mapping', () => {
     await expect(p.get('ENG-1')).rejects.toMatchObject({ category: 'network', retryable: true })
   })
 })
+
+describe('LinearWorkProvider body access', () => {
+  it('getDescription() sends the IssueDescription query with the identifier', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      jsonResponse(200, {
+        data: { issue: { id: 'internal-uuid-1', description: 'fresh description' } },
+      }),
+    ])
+    const item = makeWorkItem({
+      provider: 'linear',
+      externalId: 'ENG-123',
+      metadata: { linearId: 'internal-uuid-1' },
+    })
+
+    const description = await provider(fetchImpl).getDescription(item)
+
+    expect(description).toBe('fresh description')
+    const body = graphqlBody(calls[0])
+    expect(body.query).toContain('query IssueDescription')
+    expect(body.variables).toEqual({ id: 'ENG-123' })
+  })
+
+  it('getDescription() returns an empty string for a null description', async () => {
+    const { fetchImpl } = fakeFetch([
+      jsonResponse(200, { data: { issue: { id: 'internal-uuid-1', description: null } } }),
+    ])
+    const item = makeWorkItem({ provider: 'linear', externalId: 'ENG-123' })
+    expect(await provider(fetchImpl).getDescription(item)).toBe('')
+  })
+
+  it('getDescription() rejects when the issue does not exist', async () => {
+    const { fetchImpl } = fakeFetch([jsonResponse(200, { data: { issue: null } })])
+    const item = makeWorkItem({ provider: 'linear', externalId: 'ENG-404' })
+    await expect(provider(fetchImpl).getDescription(item)).rejects.toMatchObject({
+      category: 'invalid-input',
+    })
+  })
+
+  it('updateDescription() sends IssueUpdate with the internal Linear id', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      jsonResponse(200, {
+        data: { issueUpdate: { success: true, issue: ISSUE_FIXTURE } },
+      }),
+    ])
+    const item = makeWorkItem({
+      provider: 'linear',
+      externalId: 'ENG-123',
+      metadata: { linearId: 'internal-uuid-1' },
+    })
+
+    await provider(fetchImpl).updateDescription(item, 'rewritten description')
+
+    const body = graphqlBody(calls[0])
+    expect(body.query).toContain('mutation IssueUpdate')
+    expect(body.variables).toEqual({
+      id: 'internal-uuid-1',
+      input: { description: 'rewritten description' },
+    })
+  })
+
+  it('updateDescription() rejects an item missing the internal Linear id', async () => {
+    const { fetchImpl, calls } = fakeFetch([])
+    const item = makeWorkItem({ provider: 'linear', externalId: 'ENG-123' })
+    await expect(provider(fetchImpl).updateDescription(item, 'x')).rejects.toMatchObject({
+      category: 'invalid-input',
+    })
+    expect(calls).toHaveLength(0)
+  })
+})

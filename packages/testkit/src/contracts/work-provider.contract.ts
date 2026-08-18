@@ -125,5 +125,16 @@ export function describeWorkProviderContract(
       const states = await provider.listStates()
       expect(states.length).toBeGreaterThan(0)
     })
+
+    it('updateDescription() round-trips through getDescription() when both are supported', async () => {
+      const provider = await factory()
+      const items = await seed(provider)
+      const item = items[0]
+      if (!item) throw new Error('seed() must return at least one item')
+      if (!provider.getDescription || !provider.updateDescription) return // body access is optional
+
+      await provider.updateDescription(item, 'contract test body')
+      expect(await provider.getDescription(item)).toBe('contract test body')
+    })
   })
 }

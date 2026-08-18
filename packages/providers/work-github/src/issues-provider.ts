@@ -234,6 +234,17 @@ export class GitHubIssuesWorkProvider implements WorkProvider {
     if (transition.comment) await this.addComment(container, number, transition.comment)
   }
 
+  async getDescription(item: WorkItem): Promise<string> {
+    const container = item.repository?.locator ?? this.repo
+    const issue = await this.fetchIssue(container, item.externalId)
+    return issue.body ?? ''
+  }
+
+  async updateDescription(item: WorkItem, description: string): Promise<void> {
+    const container = item.repository?.locator ?? this.repo
+    await this.patchIssue(container, item.externalId, { body: description })
+  }
+
   async listStates(_container?: string): Promise<readonly WorkStateInfo[]> {
     return [
       { id: 'open', name: 'Open', category: 'todo' },

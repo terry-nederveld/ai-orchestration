@@ -72,4 +72,40 @@ describe('FakeWorkProvider', () => {
       category: 'invalid-input',
     })
   })
+
+  it('updateDescription() mutates the stored item and getDescription() reads it back', async () => {
+    const provider = new FakeWorkProvider()
+    const item = makeWorkItem({ externalId: 'B-1', description: 'original' })
+    provider.seed(item)
+
+    expect(await provider.getDescription(item)).toBe('original')
+    await provider.updateDescription(item, 'rewritten')
+    expect(await provider.getDescription(item)).toBe('rewritten')
+
+    expect(provider.calls.map((c) => c.op)).toEqual([
+      'getDescription',
+      'updateDescription',
+      'getDescription',
+    ])
+    const update = provider.calls[1]
+    expect(update && 'description' in update && update.description).toBe('rewritten')
+  })
+
+  it('getDescription() returns an empty string for an item without a description', async () => {
+    const provider = new FakeWorkProvider()
+    const item = makeWorkItem({ externalId: 'B-2' })
+    provider.seed(item)
+    expect(await provider.getDescription(item)).toBe('')
+  })
+
+  it('body access throws for an unknown item', async () => {
+    const provider = new FakeWorkProvider()
+    const unknown = makeWorkItem({ externalId: 'B-404' })
+    await expect(provider.getDescription(unknown)).rejects.toMatchObject({
+      category: 'invalid-input',
+    })
+    await expect(provider.updateDescription(unknown, 'x')).rejects.toMatchObject({
+      category: 'invalid-input',
+    })
+  })
 })

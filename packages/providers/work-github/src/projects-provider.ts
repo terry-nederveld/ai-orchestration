@@ -139,6 +139,12 @@ const ADD_COMMENT_MUTATION = `
   }
 `
 
+const UPDATE_ISSUE_BODY_MUTATION = `
+  mutation($id: ID!, $body: String!) {
+    updateIssue(input: { id: $id, body: $body }) { clientMutationId }
+  }
+`
+
 const UPDATE_FIELD_MUTATION = `
   mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
     updateProjectV2ItemFieldValue(
@@ -309,6 +315,27 @@ export class GitHubProjectsWorkProvider implements WorkProvider {
       const contentId = contentNodeIdOf(item)
       if (contentId) await this.addIssueComment(contentId, transition.comment)
     }
+  }
+
+  async getDescription(item: WorkItem): Promise<string> {
+    const data = await this.graphql<{ node: ProjectV2Item | null }>(nodeQuery(), {
+      id: item.externalId,
+    })
+    if (!data.node) {
+      throw new OrchestratorError(`project item not found: ${item.externalId}`, 'invalid-input')
+    }
+    return data.node.content?.body ?? ''
+  }
+
+  async updateDescription(item: WorkItem, description: string): Promise<void> {
+    const contentId = contentNodeIdOf(item)
+    if (!contentId) {
+      throw new OrchestratorError(
+        'cannot update the body of a draft item: drafts have no underlying issue',
+        'invalid-input',
+      )
+    }
+    await this.graphql(UPDATE_ISSUE_BODY_MUTATION, { id: contentId, body: description })
   }
 
   async listStates(): Promise<readonly WorkStateInfo[]> {

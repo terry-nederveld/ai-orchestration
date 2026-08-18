@@ -319,3 +319,78 @@ describe('JiraCloudWorkProvider', () => {
     expect(error.category).toBe('network')
   })
 })
+
+describe('JiraCloudWorkProvider body access', () => {
+  const item: WorkItem = {
+    id: 'jira-cloud:PROJ-5' as WorkItem['id'],
+    provider: 'jira-cloud',
+    externalId: 'PROJ-5',
+    title: 'x',
+    state: 'To Do',
+    labels: [],
+    assignees: [],
+    relationships: [],
+    metadata: {},
+  }
+
+  it('getDescription() fetches only the description field and flattens ADF to text', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      jsonResponse(200, {
+        key: 'PROJ-5',
+        fields: {
+          description: {
+            type: 'doc',
+            version: 1,
+            content: [
+              { type: 'paragraph', content: [{ type: 'text', text: 'First paragraph.' }] },
+              { type: 'paragraph', content: [{ type: 'text', text: 'Second paragraph.' }] },
+            ],
+          },
+        },
+      }),
+    ])
+    const provider = makeProvider(fetchImpl)
+
+    const description = await provider.getDescription(item)
+
+    expect(description).toBe('First paragraph.\n\nSecond paragraph.')
+    const url = new URL(calls[0]?.url ?? '')
+    expect(url.pathname).toBe('/rest/api/3/issue/PROJ-5')
+    expect(url.searchParams.get('fields')).toBe('description')
+  })
+
+  it('getDescription() returns an empty string for a null description', async () => {
+    const { fetchImpl } = fakeFetch([
+      jsonResponse(200, { key: 'PROJ-5', fields: { description: null } }),
+    ])
+    const provider = makeProvider(fetchImpl)
+    expect(await provider.getDescription(item)).toBe('')
+  })
+
+  it('updateDescription() PUTs the body wrapped in a minimal ADF document', async () => {
+    const { fetchImpl, calls } = fakeFetch([new Response(null, { status: 204 })])
+    const provider = makeProvider(fetchImpl)
+
+    await provider.updateDescription(item, 'plain text body')
+
+    expect(calls[0]?.url).toContain('/rest/api/3/issue/PROJ-5')
+    expect(calls[0]?.init.method).toBe('PUT')
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+      fields: {
+        description: {
+          type: 'doc',
+          version: 1,
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'plain text body' }] }],
+        },
+      },
+    })
+  })
+
+  it('updateDescription() surfaces mapped HTTP errors', async () => {
+    const { fetchImpl } = fakeFetch([textErrorResponse(401, 'unauthorized')])
+    const provider = makeProvider(fetchImpl)
+    await expect(provider.updateDescription(item, 'x')).rejects.toMatchObject({
+      category: 'auth-expired',
+    })
+  })
+})

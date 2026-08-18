@@ -298,3 +298,58 @@ describe('JiraDataCenterWorkProvider', () => {
     expect(error.category).toBe('network')
   })
 })
+
+describe('JiraDataCenterWorkProvider body access', () => {
+  const item: WorkItem = {
+    id: 'jira-datacenter:PROJ-5' as WorkItem['id'],
+    provider: 'jira-datacenter',
+    externalId: 'PROJ-5',
+    title: 'x',
+    state: 'To Do',
+    labels: [],
+    assignees: [],
+    relationships: [],
+    metadata: {},
+  }
+
+  it('getDescription() fetches only the description field as a plain string', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      jsonResponse(200, { key: 'PROJ-5', fields: { description: 'plain wiki text' } }),
+    ])
+    const provider = makeProvider(fetchImpl)
+
+    expect(await provider.getDescription(item)).toBe('plain wiki text')
+    const url = new URL(calls[0]?.url ?? '')
+    expect(url.pathname).toBe('/rest/api/2/issue/PROJ-5')
+    expect(url.searchParams.get('fields')).toBe('description')
+  })
+
+  it('getDescription() returns an empty string for a null description', async () => {
+    const { fetchImpl } = fakeFetch([
+      jsonResponse(200, { key: 'PROJ-5', fields: { description: null } }),
+    ])
+    const provider = makeProvider(fetchImpl)
+    expect(await provider.getDescription(item)).toBe('')
+  })
+
+  it('updateDescription() PUTs the body as a plain string', async () => {
+    const { fetchImpl, calls } = fakeFetch([new Response(null, { status: 204 })])
+    const provider = makeProvider(fetchImpl)
+
+    await provider.updateDescription(item, 'new plain body')
+
+    expect(calls[0]?.url).toContain('/rest/api/2/issue/PROJ-5')
+    expect(calls[0]?.init.method).toBe('PUT')
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+      fields: { description: 'new plain body' },
+    })
+  })
+
+  it('updateDescription() surfaces mapped HTTP errors', async () => {
+    const { fetchImpl } = fakeFetch([textErrorResponse(401, 'unauthorized')])
+    const provider = makeProvider(fetchImpl)
+    await expect(provider.updateDescription(item, 'x')).rejects.toMatchObject({
+      category: 'auth-expired',
+    })
+  })
+})

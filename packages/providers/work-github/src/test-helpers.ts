@@ -191,8 +191,12 @@ export class FakeGitHubBackend {
     if (!issue) return jsonResponse(404, { message: 'Not Found' })
     if (method === 'GET') return jsonResponse(200, serializeIssue(issue))
     if (method === 'PATCH') {
-      const body = JSON.parse(String(init.body ?? '{}')) as { state?: 'open' | 'closed' }
+      const body = JSON.parse(String(init.body ?? '{}')) as {
+        state?: 'open' | 'closed'
+        body?: string
+      }
       if (body.state) issue.state = body.state
+      if (body.body !== undefined) issue.body = body.body
       return jsonResponse(200, serializeIssue(issue))
     }
     return jsonResponse(405, { message: 'method not allowed' })

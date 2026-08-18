@@ -109,6 +109,14 @@ class FakeLinearBackend {
       return { data: { issues: { nodes } } }
     }
 
+    if (query.includes('query IssueDescription')) {
+      const id = variables.id as string
+      const issue = this.issues.get(id) ?? this.findByInternalId(id)
+      return {
+        data: { issue: issue ? { id: issue.id, description: issue.description } : null },
+      }
+    }
+
     if (query.includes('query IssueGet')) {
       const id = variables.id as string
       const issue = this.issues.get(id) ?? this.findByInternalId(id)
@@ -153,10 +161,15 @@ class FakeLinearBackend {
 
     if (query.includes('mutation IssueUpdate')) {
       const id = variables.id as string
-      const input = variables.input as { labelIds?: string[]; stateId?: string }
+      const input = variables.input as {
+        labelIds?: string[]
+        stateId?: string
+        description?: string
+      }
       const issue = this.findByInternalId(id)
       if (!issue) return { errors: [{ message: `Entity not found: ${id}` }] }
       if (input.labelIds) issue.labelIds = input.labelIds
+      if (input.description !== undefined) issue.description = input.description
       if (input.stateId) {
         const state = this.states.find((s) => s.id === input.stateId)
         if (state) {

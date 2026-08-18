@@ -67,6 +67,25 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@24.13.3)(jsdom@25.0.1)(yaml@2.9.0)
 
+  packages/checkpoints:
+    dependencies:
+      '@overture/core':
+        specifier: workspace:*
+        version: link:../core
+      '@overture/scm-git':
+        specifier: workspace:*
+        version: link:../scm-git
+    devDependencies:
+      '@overture/testkit':
+        specifier: workspace:*
+        version: link:../testkit
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@24.13.3)(jsdom@25.0.1)(yaml@2.9.0)
+
   packages/cli:
     dependencies:
       '@overture/agent-claude-code':
@@ -457,6 +476,22 @@ importers:
       '@overture/testkit':
         specifier: workspace:*
         version: link:../../testkit
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@24.13.3)(jsdom@25.0.1)(yaml@2.9.0)
+
+  packages/resolution:
+    dependencies:
+      '@overture/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@overture/testkit':
+        specifier: workspace:*
+        version: link:../testkit
       typescript:
         specifier: ^5.9.2
         version: 5.9.3

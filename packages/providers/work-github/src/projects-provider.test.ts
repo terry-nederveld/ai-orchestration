@@ -382,3 +382,79 @@ describe('GitHubProjectsWorkProvider.detect', () => {
     expect(availability).toMatchObject({ available: true, authenticated: true })
   })
 })
+
+describe('GitHubProjectsWorkProvider body access', () => {
+  it('getDescription() re-queries the project item node and returns the content body', async () => {
+    const fetchImpl = routedFetch((_url, init) => {
+      const body = graphqlBody(init)
+      expect(body.query).toContain('node(id: $id)')
+      expect(body.variables).toEqual({ id: 'item_1' })
+      return jsonResponse(200, { data: { node: issueItemNode } })
+    })
+    const provider = makeProvider(fetchImpl)
+    const item = { ...baseItem('item_1'), metadata: { contentNodeId: 'issue_node_1' } }
+
+    expect(await provider.getDescription(item)).toBe('Details')
+  })
+
+  it('getDescription() returns an empty string for inaccessible content', async () => {
+    const fetchImpl = routedFetch(() =>
+      jsonResponse(200, {
+        data: { node: { id: 'item_3', fieldValues: { nodes: [] }, content: null } },
+      }),
+    )
+    const provider = makeProvider(fetchImpl)
+
+    expect(await provider.getDescription(baseItem('item_3'))).toBe('')
+  })
+
+  it('getDescription() rejects when the project item no longer exists', async () => {
+    const fetchImpl = routedFetch(() => jsonResponse(200, { data: { node: null } }))
+    const provider = makeProvider(fetchImpl)
+
+    await expect(provider.getDescription(baseItem('item_gone'))).rejects.toMatchObject({
+      category: 'invalid-input',
+    })
+  })
+
+  it('updateDescription() sends the updateIssue mutation against the content node', async () => {
+    const mutations: { query: string; variables: Record<string, unknown> }[] = []
+    const fetchImpl = routedFetch((_url, init) => {
+      mutations.push(graphqlBody(init))
+      return jsonResponse(200, { data: { updateIssue: { clientMutationId: null } } })
+    })
+    const provider = makeProvider(fetchImpl)
+    const item = { ...baseItem('item_1'), metadata: { contentNodeId: 'issue_node_1' } }
+
+    await provider.updateDescription(item, 'fresh body')
+
+    expect(mutations).toHaveLength(1)
+    expect(mutations[0]?.query).toContain('updateIssue')
+    expect(mutations[0]?.variables).toEqual({ id: 'issue_node_1', body: 'fresh body' })
+  })
+
+  it('updateDescription() rejects draft items, which have no underlying issue', async () => {
+    const fetchImpl = routedFetch(() => {
+      throw new Error('no request expected for a draft item')
+    })
+    const provider = makeProvider(fetchImpl)
+
+    await expect(provider.updateDescription(baseItem('item_2'), 'x')).rejects.toMatchObject({
+      category: 'invalid-input',
+    })
+  })
+})
+
+function baseItem(externalId: string) {
+  return {
+    id: asId<'work-item'>(`github-projects:${externalId}`),
+    provider: 'github-projects',
+    externalId,
+    title: 'x',
+    state: 'Todo',
+    labels: [],
+    assignees: [],
+    relationships: [],
+    metadata: {},
+  }
+}

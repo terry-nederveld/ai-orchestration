@@ -414,3 +414,73 @@ describe('GitHubIssuesWorkProvider.listStates', () => {
     expect(states.map((s) => s.id)).toEqual(['open', 'closed', 'review'])
   })
 })
+
+describe('GitHubIssuesWorkProvider body access', () => {
+  it('getDescription() fetches the fresh issue body, ignoring the cached item', async () => {
+    const backend = new FakeGitHubBackend('acme/widgets')
+    const number = backend.addIssue({ title: 'Doc me', body: 'original body' })
+    const provider = makeProvider(backend.fetchImpl)
+    const item = await provider.get(String(number))
+
+    await provider.updateDescription(item, 'updated body')
+
+    // `item` still carries the stale description; the fetch must be fresh.
+    expect(item.description).toBe('original body')
+    expect(await provider.getDescription(item)).toBe('updated body')
+  })
+
+  it('getDescription() returns an empty string for a null body', async () => {
+    const backend = new FakeGitHubBackend('acme/widgets')
+    const number = backend.addIssue({ title: 'No body' })
+    const provider = makeProvider(backend.fetchImpl)
+    const item = await provider.get(String(number))
+
+    expect(await provider.getDescription(item)).toBe('')
+  })
+
+  it('updateDescription() PATCHes the issue with the new body', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      jsonResponse(200, {
+        number: 8,
+        node_id: 'n8',
+        title: 'x',
+        body: 'new body',
+        state: 'open',
+        labels: [],
+        html_url: 'u',
+        updated_at: '2026-01-01T00:00:00Z',
+      }),
+    ])
+    const provider = makeProvider(fetchImpl)
+    const item: WorkItem = {
+      id: asId('github:acme/widgets#8'),
+      provider: 'github',
+      externalId: '8',
+      title: 'x',
+      state: 'open',
+      labels: [],
+      assignees: [],
+      relationships: [],
+      repository: { locator: 'acme/widgets' },
+      metadata: {},
+    }
+
+    await provider.updateDescription(item, 'new body')
+
+    expect(calls[0]?.url).toContain('/repos/acme/widgets/issues/8')
+    expect(calls[0]?.init.method).toBe('PATCH')
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({ body: 'new body' })
+  })
+
+  it('updateDescription() surfaces mapped HTTP errors', async () => {
+    const backend = new FakeGitHubBackend('acme/widgets')
+    const number = backend.addIssue({ title: 'Doc me' })
+    const provider = makeProvider(backend.fetchImpl)
+    const item = await provider.get(String(number))
+
+    const failing = makeProvider(fakeFetch([textErrorResponse(403, 'forbidden')]).fetchImpl)
+    await expect(failing.updateDescription(item, 'x')).rejects.toMatchObject({
+      category: 'invalid-input',
+    })
+  })
+})

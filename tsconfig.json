@@ -10,6 +10,8 @@
     { "path": "packages/scm-git" },
     { "path": "packages/workspaces" },
     { "path": "packages/policy" },
+    { "path": "packages/checkpoints" },
+    { "path": "packages/resolution" },
     { "path": "packages/providers/model-anthropic" },
     { "path": "packages/providers/model-openai" },
     { "path": "packages/providers/work-jira-cloud" },

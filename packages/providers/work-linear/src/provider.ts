@@ -46,6 +46,7 @@ import {
   buildIssueFilter,
   COMMENT_CREATE_MUTATION,
   ISSUE_CLAIM_STATE_QUERY,
+  ISSUE_DESCRIPTION_QUERY,
   ISSUE_GET_QUERY,
   ISSUE_LABEL_CREATE_MUTATION,
   ISSUE_UPDATE_MUTATION,
@@ -220,6 +221,22 @@ export class LinearWorkProvider implements WorkProvider {
         input: { issueId: linearId, body: transition.comment },
       })
     }
+  }
+
+  async getDescription(item: WorkItem): Promise<string> {
+    const data = await this.request<{ issue: { description: string | null } | null }>(
+      ISSUE_DESCRIPTION_QUERY,
+      { id: item.externalId },
+    )
+    if (!data.issue) {
+      throw new OrchestratorError(`Linear issue not found: ${item.externalId}`, 'invalid-input')
+    }
+    return data.issue.description ?? ''
+  }
+
+  async updateDescription(item: WorkItem, description: string): Promise<void> {
+    const linearId = this.resolveLinearId(item)
+    await this.request(ISSUE_UPDATE_MUTATION, { id: linearId, input: { description } })
   }
 
   async listStates(container?: string): Promise<readonly WorkStateInfo[]> {

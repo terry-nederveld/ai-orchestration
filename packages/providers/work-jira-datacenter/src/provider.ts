@@ -214,6 +214,27 @@ export class JiraDataCenterWorkProvider implements WorkProvider {
     if (!postResponse.ok) throw await mapHttpErrorResponse(postResponse)
   }
 
+  async getDescription(item: WorkItem): Promise<string> {
+    const params = new URLSearchParams({ fields: 'description' })
+    const response = await this.rawFetch(
+      `/issue/${encodeURIComponent(item.externalId)}?${params}`,
+      {
+        method: 'GET',
+      },
+    )
+    if (!response.ok) throw await mapHttpErrorResponse(response)
+    const issue = (await response.json()) as JiraIssue
+    return issue.fields.description ?? ''
+  }
+
+  async updateDescription(item: WorkItem, description: string): Promise<void> {
+    const response = await this.rawFetch(`/issue/${encodeURIComponent(item.externalId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ fields: { description } }),
+    })
+    if (!response.ok) throw await mapHttpErrorResponse(response)
+  }
+
   async listStates(container?: string): Promise<readonly WorkStateInfo[]> {
     const key = container ?? this.projectKey
     if (key) {

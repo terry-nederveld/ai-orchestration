@@ -49,6 +49,16 @@ export const ISSUE_GET_QUERY = `
   }
 `
 
+/** Fresh description fetch for getDescription(); deliberately narrow so it stays cheap. */
+export const ISSUE_DESCRIPTION_QUERY = `
+  query IssueDescription($id: String!) {
+    issue(id: $id) {
+      id
+      description
+    }
+  }
+`
+
 /** Authoritative snapshot for claim()/release(): current claim label and the latest marker comment. */
 export const ISSUE_CLAIM_STATE_QUERY = `
   query IssueClaimState($id: String!) {

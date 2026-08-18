@@ -17,7 +17,7 @@ import {
   type WorkStateInfo,
   type WorkTransition,
 } from '@overture/core'
-import { textToAdf } from './adf.js'
+import { adfToText, textToAdf } from './adf.js'
 import { isAbortError, mapHttpErrorResponse, mapNetworkError } from './http-errors.js'
 import type {
   JiraIssue,
@@ -209,6 +209,34 @@ export class JiraCloudWorkProvider implements WorkProvider {
       { method: 'POST', body: JSON.stringify(body) },
     )
     if (!postResponse.ok) throw await mapHttpErrorResponse(postResponse)
+  }
+
+  async getDescription(item: WorkItem): Promise<string> {
+    const params = new URLSearchParams({ fields: 'description' })
+    const response = await this.rawFetch(
+      `/issue/${encodeURIComponent(item.externalId)}?${params}`,
+      {
+        method: 'GET',
+      },
+    )
+    if (!response.ok) throw await mapHttpErrorResponse(response)
+    const issue = (await response.json()) as JiraIssue
+    return adfToText(issue.fields.description)
+  }
+
+  /**
+   * Fidelity caveat: Jira Cloud stores descriptions as ADF, and this adapter
+   * only speaks plain text. Round-tripping getDescription() -> edit ->
+   * updateDescription() flattens rich content (tables, mentions, panels,
+   * formatting marks) into the plain text adfToText() extracted from it —
+   * the replacement body is a single plain-text paragraph.
+   */
+  async updateDescription(item: WorkItem, description: string): Promise<void> {
+    const response = await this.rawFetch(`/issue/${encodeURIComponent(item.externalId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ fields: { description: textToAdf(description) } }),
+    })
+    if (!response.ok) throw await mapHttpErrorResponse(response)
   }
 
   async listStates(container?: string): Promise<readonly WorkStateInfo[]> {

@@ -30,6 +30,8 @@ export type WorkProviderCall =
   | { readonly op: 'release'; readonly item: WorkItem; readonly claim: WorkClaim }
   | { readonly op: 'comment'; readonly item: WorkItem; readonly comment: WorkComment }
   | { readonly op: 'transition'; readonly item: WorkItem; readonly transition: WorkTransition }
+  | { readonly op: 'getDescription'; readonly item: WorkItem }
+  | { readonly op: 'updateDescription'; readonly item: WorkItem; readonly description: string }
 
 export interface FakeWorkProviderOptions {
   readonly info?: Partial<ProviderInfo>
@@ -147,5 +149,23 @@ export class FakeWorkProvider implements WorkProvider {
 
   async listStates(_container?: string): Promise<readonly WorkStateInfo[]> {
     return this.states
+  }
+
+  async getDescription(item: WorkItem): Promise<string> {
+    this.calls.push({ op: 'getDescription', item })
+    const stored = this.items.get(item.id)
+    if (!stored) {
+      throw new OrchestratorError(`work item not found: ${item.id}`, 'invalid-input')
+    }
+    return stored.description ?? ''
+  }
+
+  async updateDescription(item: WorkItem, description: string): Promise<void> {
+    const stored = this.items.get(item.id)
+    if (!stored) {
+      throw new OrchestratorError(`work item not found: ${item.id}`, 'invalid-input')
+    }
+    this.items.set(item.id, { ...stored, description })
+    this.calls.push({ op: 'updateDescription', item, description })
   }
 }

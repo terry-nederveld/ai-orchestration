@@ -1,0 +1,29 @@
+{
+  "name": "@overture/checkpoints",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Durable checkpoint strategies: git branch push/restore and work-item managed sections",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run --root ../.. --project @overture/checkpoints"
+  },
+  "dependencies": {
+    "@overture/core": "workspace:*",
+    "@overture/scm-git": "workspace:*"
+  },
+  "devDependencies": {
+    "@overture/testkit": "workspace:*",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
