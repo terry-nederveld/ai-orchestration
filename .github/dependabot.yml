@@ -18,6 +18,12 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # TypeScript 7's native compiler does not yet resolve @types/node
+      # globals under our NodeNext + composite build and its --build mode
+      # exits 0 while emitting errors. Revisit when tsgo reaches parity.
+      - dependency-name: "typescript"
+        versions: [">=7.0.0"]
     open-pull-requests-limit: 10
 
   # Rust crates for the Tauri desktop shell
