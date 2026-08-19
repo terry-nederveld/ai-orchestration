@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import YAML from 'yaml'
 import { GraphEditor } from './GraphEditor'
-import type { WorkflowGraphDoc } from './types'
+import type { GraphIssue, WorkflowGraphDoc } from './types'
 
 const miniGraph: WorkflowGraphDoc = {
   name: 'mini',
@@ -15,11 +15,17 @@ const miniGraph: WorkflowGraphDoc = {
 }
 
 function renderEditor(overrides?: {
-  onValidate?: ReturnType<typeof vi.fn>
-  onSave?: ReturnType<typeof vi.fn>
+  onValidate?: ReturnType<typeof vi.fn<(doc: WorkflowGraphDoc) => Promise<readonly GraphIssue[]>>>
+  onSave?: ReturnType<typeof vi.fn<(doc: WorkflowGraphDoc) => Promise<{ version: number }>>>
 }) {
-  const onValidate = overrides?.onValidate ?? vi.fn().mockResolvedValue([])
-  const onSave = overrides?.onSave ?? vi.fn().mockResolvedValue({ version: 2 })
+  const onValidate =
+    overrides?.onValidate ??
+    vi.fn<(doc: WorkflowGraphDoc) => Promise<readonly GraphIssue[]>>().mockResolvedValue([])
+  const onSave =
+    overrides?.onSave ??
+    vi.fn<(doc: WorkflowGraphDoc) => Promise<{ version: number }>>().mockResolvedValue({
+      version: 2,
+    })
   render(
     <GraphEditor name="mini" initialDocument={miniGraph} onValidate={onValidate} onSave={onSave} />,
   )
