@@ -21,10 +21,10 @@
     "@overture/core": "workspace:*"
   },
   "peerDependencies": {
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.10"
   },
   "devDependencies": {
     "typescript": "^5.9.2",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.10"
   }
 }
