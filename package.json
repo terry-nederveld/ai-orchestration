@@ -19,8 +19,8 @@
     "desktop:build": "pnpm --filter @overture/ui build && pnpm --filter @overture/desktop build"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.2.0",
-    "@types/node": "^26.2.0",
+    "@biomejs/biome": "^2.6.2",
+    "@types/node": "^26.6.5",
     "typescript": "^5.9.2",
     "vitest": "^4.1.10"
   }
