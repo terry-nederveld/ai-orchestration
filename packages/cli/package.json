@@ -46,7 +46,7 @@
     "@overture/work-linear": "workspace:*",
     "@overture/workflow": "workspace:*",
     "@overture/workspaces": "workspace:*",
-    "yaml": "^2.8.0"
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@overture/testkit": "workspace:*",
